@@ -38,7 +38,7 @@
 
 ## 개발
 
-이 프로젝트는 프론트엔드 빌드에 TypeScript와 Vite를 사용합니다. 3D 뷰포트는 Three.js로 구축되었습니다.
+이 프로젝트는 프론트엔드 빌드에 Vue 3, TypeScript, Vite를 사용합니다. 3D 뷰포트는 Three.js로 구축되었습니다. 백엔드는 ComfyUI V3 노드 API를 사용합니다.
 
 ### 사전 요구 사항
 
@@ -66,15 +66,22 @@ npm run typecheck
 ```
 ComfyUI-qwenmultiangle/
 ├── src/
-│   ├── main.ts           # 익스텐션 진입점
-│   ├── CameraWidget.ts   # Three.js 카메라 제어 위젯
-│   ├── i18n.ts           # 국제화 (en/zh/ja/ko)
-│   ├── styles.ts         # CSS 스타일
-│   └── types.ts          # TypeScript 타입 정의
-├── js/                   # 빌드 출력 (배포용으로 커밋됨)
-│   └── main.js
-├── nodes.py              # ComfyUI 노드 정의
-├── __init__.py           # Python 모듈 초기화
+│   ├── main.ts                        # 익스텐션 진입점 (Vue 앱 마운트)
+│   ├── App.vue                        # 루트 Vue 컴포넌트
+│   ├── CameraWidget.ts               # 헤드리스 Three.js 카메라 제어 엔진
+│   ├── i18n.ts                        # 국제화 (en/zh/ja/ko)
+│   ├── types.ts                       # TypeScript 타입 정의
+│   ├── components/
+│   │   ├── SceneCanvas.vue            # Three.js 캔버스 컨테이너
+│   │   └── ControlPanel.vue           # 드롭다운 컨트롤 및 값 표시
+│   └── composables/
+│       └── useCameraWidget.ts         # 반응형 상태 브릿지 (Vue ↔ Three.js)
+├── js/                                # 빌드 출력 (배포용으로 커밋됨)
+│   ├── main.js
+│   └── assets/
+│       └── main.css
+├── nodes.py                           # ComfyUI V3 노드 정의
+├── __init__.py                        # Python 모듈 초기화
 ├── package.json
 ├── tsconfig.json
 └── vite.config.mts

@@ -38,7 +38,7 @@ A ComfyUI custom node for 3D camera angle control. Provides an interactive Three
 
 ## Development
 
-This project uses TypeScript and Vite for building the frontend. The 3D viewport is built with Three.js.
+This project uses Vue 3, TypeScript, and Vite for building the frontend. The 3D viewport is built with Three.js. The backend uses ComfyUI's V3 node API.
 
 ### Prerequisites
 
@@ -66,15 +66,22 @@ npm run typecheck
 ```
 ComfyUI-qwenmultiangle/
 ├── src/
-│   ├── main.ts           # Extension entry point
-│   ├── CameraWidget.ts   # Three.js camera control widget
-│   ├── i18n.ts           # Internationalization (en/zh/ja/ko)
-│   ├── styles.ts         # CSS styles
-│   └── types.ts          # TypeScript type definitions
-├── js/                   # Build output (committed for distribution)
-│   └── main.js
-├── nodes.py              # ComfyUI node definition
-├── __init__.py           # Python module init
+│   ├── main.ts                        # Extension entry point (Vue app mounting)
+│   ├── App.vue                        # Root Vue component
+│   ├── CameraWidget.ts               # Headless Three.js camera control engine
+│   ├── i18n.ts                        # Internationalization (en/zh/ja/ko)
+│   ├── types.ts                       # TypeScript type definitions
+│   ├── components/
+│   │   ├── SceneCanvas.vue            # Three.js canvas container
+│   │   └── ControlPanel.vue           # Dropdown controls & value display
+│   └── composables/
+│       └── useCameraWidget.ts         # Reactive state bridge (Vue ↔ Three.js)
+├── js/                                # Build output (committed for distribution)
+│   ├── main.js
+│   └── assets/
+│       └── main.css
+├── nodes.py                           # ComfyUI V3 node definition
+├── __init__.py                        # Python module init
 ├── package.json
 ├── tsconfig.json
 └── vite.config.mts

@@ -38,7 +38,7 @@
 
 ## 开发
 
-本项目使用 TypeScript 和 Vite 构建前端。3D 视口使用 Three.js 构建。
+本项目使用 Vue 3、TypeScript 和 Vite 构建前端。3D 视口使用 Three.js 构建。后端使用 ComfyUI V3 节点 API。
 
 ### 前置要求
 
@@ -66,15 +66,22 @@ npm run typecheck
 ```
 ComfyUI-qwenmultiangle/
 ├── src/
-│   ├── main.ts           # 扩展入口点
-│   ├── CameraWidget.ts   # Three.js 相机控制组件
-│   ├── i18n.ts           # 国际化 (en/zh/ja/ko)
-│   ├── styles.ts         # CSS 样式
-│   └── types.ts          # TypeScript 类型定义
-├── js/                   # 构建输出（已提交用于分发）
-│   └── main.js
-├── nodes.py              # ComfyUI 节点定义
-├── __init__.py           # Python 模块初始化
+│   ├── main.ts                        # 扩展入口点（Vue 应用挂载）
+│   ├── App.vue                        # 根 Vue 组件
+│   ├── CameraWidget.ts               # 无头 Three.js 相机控制引擎
+│   ├── i18n.ts                        # 国际化 (en/zh/ja/ko)
+│   ├── types.ts                       # TypeScript 类型定义
+│   ├── components/
+│   │   ├── SceneCanvas.vue            # Three.js 画布容器
+│   │   └── ControlPanel.vue           # 下拉控件和数值显示
+│   └── composables/
+│       └── useCameraWidget.ts         # 响应式状态桥接（Vue ↔ Three.js）
+├── js/                                # 构建输出（已提交用于分发）
+│   ├── main.js
+│   └── assets/
+│       └── main.css
+├── nodes.py                           # ComfyUI V3 节点定义
+├── __init__.py                        # Python 模块初始化
 ├── package.json
 ├── tsconfig.json
 └── vite.config.mts
