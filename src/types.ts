@@ -1,5 +1,3 @@
-import type { LGraphNode } from '@comfyorg/comfyui-frontend-types'
-
 export interface CameraState {
   azimuth: number
   elevation: number
@@ -8,31 +6,10 @@ export interface CameraState {
 }
 
 export interface CameraWidgetOptions {
-  node: LGraphNode
+  node: ComfyNode
   container: HTMLElement
   initialState?: Partial<CameraState>
   onStateChange?: (state: CameraState) => void
 }
 
-export interface QwenMultiangleNode extends LGraphNode {
-  widgets?: Array<{
-    name: string
-    value: unknown
-    callback?: (value: unknown) => void
-  }>
-}
-
-export interface DOMWidgetOptions {
-  getMinHeight?: () => number
-  hideOnZoom?: boolean
-  serialize?: boolean
-}
-
-export interface DOMWidget {
-  name: string
-  type: string
-  element: HTMLElement
-  options: DOMWidgetOptions
-  onRemove?: () => void
-  serializeValue?: () => Promise<string> | string
-}
+export type QwenMultiangleNode = ComfyNode

@@ -1,7 +1,6 @@
 var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
-import { app as app$1 } from "../../../scripts/app.js";
 /**
  * @license
  * Copyright 2010-2024 Three.js Authors
@@ -20244,6 +20243,7 @@ function injectStyles() {
   style.textContent = WIDGET_STYLES;
   document.head.appendChild(style);
 }
+const { app: app$1 } = window.comfyAPI.app;
 const translations = {
   en: {
     // Dropdown labels
@@ -20422,13 +20422,11 @@ class CameraWidget {
     __publicField(this, "container");
     __publicField(this, "state");
     __publicField(this, "onStateChange");
-    // Three.js objects
     __publicField(this, "scene");
     __publicField(this, "camera");
     __publicField(this, "previewCamera");
     __publicField(this, "renderer");
     __publicField(this, "activeCamera");
-    // Scene objects
     __publicField(this, "cameraIndicator");
     __publicField(this, "camGlow");
     __publicField(this, "azimuthHandle");
@@ -20442,37 +20440,29 @@ class CameraWidget {
     __publicField(this, "imageFrame");
     __publicField(this, "planeMat");
     __publicField(this, "distanceTube", null);
-    // Control objects
     __publicField(this, "azimuthRing");
     __publicField(this, "elevationArc");
     __publicField(this, "gridHelper");
-    // Constants
     __publicField(this, "CENTER", new Vector3(0, 0.5, 0));
     __publicField(this, "AZIMUTH_RADIUS", 1.8);
     __publicField(this, "ELEVATION_RADIUS", 1.4);
     __publicField(this, "ELEV_ARC_X", -0.8);
-    // Live values for smooth updates
     __publicField(this, "liveAzimuth", 0);
     __publicField(this, "liveElevation", 0);
     __publicField(this, "liveDistance", 5);
-    // Interaction state
     __publicField(this, "isDragging", false);
     __publicField(this, "dragTarget", null);
     __publicField(this, "hoveredHandle", null);
     __publicField(this, "raycaster", new Raycaster());
     __publicField(this, "mouse", new Vector2());
-    // Camera view mode
     __publicField(this, "useCameraView", false);
-    // Orbit control state (for camera_view mode)
     __publicField(this, "isOrbitDragging", false);
     __publicField(this, "orbitStartX", 0);
     __publicField(this, "orbitStartY", 0);
     __publicField(this, "orbitStartAzimuth", 0);
     __publicField(this, "orbitStartElevation", 0);
-    // Animation
     __publicField(this, "animationId", null);
     __publicField(this, "time", 0);
-    // DOM elements
     __publicField(this, "canvasContainer");
     __publicField(this, "promptEl");
     __publicField(this, "hValueEl");
@@ -20481,7 +20471,6 @@ class CameraWidget {
     __publicField(this, "azimuthSelect");
     __publicField(this, "elevationSelect");
     __publicField(this, "distanceSelect");
-    // Dropdown options mapping (key is i18n key, promptKey is for output)
     __publicField(this, "AZIMUTH_OPTIONS", [
       { key: "frontView", promptKey: "front view", value: 0 },
       { key: "frontRightQuarterView", promptKey: "front-right quarter view", value: 45 },
@@ -21127,7 +21116,6 @@ class CameraWidget {
     this.notifyStateChange();
     console.log("resetToDefaults");
   }
-  // Public API
   setState(newState) {
     if (newState.azimuth !== void 0) {
       this.state.azimuth = newState.azimuth;

@@ -11,7 +11,7 @@
     "three": "^0.170.0"
   },
   "devDependencies": {
-    "@comfyorg/comfyui-frontend-types": "^1.35.4",
+    "@comfyorg/comfyui-frontend-types": "^1.43.3",
     "@types/node": "^22.10.1",
     "@types/three": "^0.170.0",
     "typescript": "^5.7.2",

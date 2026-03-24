@@ -1,15 +1,13 @@
-// import { app } from '../../../scripts/app.js'
-// import { api } from '../../../scripts/api.js'
 const { app } = window.comfyAPI.app
 const { api } = window.comfyAPI.api
 
 import { CameraWidget } from './CameraWidget'
-import type { CameraState, QwenMultiangleNode, DOMWidget } from './types'
+import type { CameraState, QwenMultiangleNode } from './types'
 
 // Store widget instances for cleanup
 const widgetInstances = new Map<number, CameraWidget>()
 
-function createCameraWidget(node: QwenMultiangleNode): { widget: DOMWidget } {
+function createCameraWidget(node: QwenMultiangleNode): { widget: DOMWidgetInstance } {
   const container = document.createElement('div')
   container.id = `qwen-multiangle-widget-${node.id}`
   container.style.width = '100%'
@@ -38,7 +36,7 @@ function createCameraWidget(node: QwenMultiangleNode): { widget: DOMWidget } {
       hideOnZoom: false,
       serialize: false
     }
-  ) as DOMWidget
+  )
 
   // Create the camera widget after a small delay to ensure container is mounted
   setTimeout(() => {

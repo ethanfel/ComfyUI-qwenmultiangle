@@ -1,5 +1,5 @@
 // Internationalization module for the camera widget
-import { app } from '../../../scripts/app.js'
+const { app } = window.comfyAPI.app
 
 export type Locale = 'en' | 'zh' | 'ja' | 'ko'
 
