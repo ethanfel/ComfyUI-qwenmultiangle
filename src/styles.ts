@@ -13,6 +13,7 @@ export const WIDGET_STYLES = `
     width: 100%;
     height: 100%;
     display: block;
+    position: relative;
   }
 
   .qwen-multiangle-prompt {
@@ -40,24 +41,29 @@ export const WIDGET_STYLES = `
     background: rgba(10, 10, 15, 0.9);
     border: 1px solid rgba(233, 61, 130, 0.3);
     border-radius: 6px;
-    padding: 8px 12px;
+    padding: 6px 10px;
     font-size: 11px;
     color: #e0e0e0;
     display: flex;
+    flex-direction: column;
+    gap: 4px;
+    backdrop-filter: blur(4px);
+  }
+
+  .qwen-multiangle-info-row {
+    display: flex;
     justify-content: space-around;
     align-items: center;
-    backdrop-filter: blur(4px);
+  }
+
+  .qwen-multiangle-control {
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
 
   .qwen-multiangle-param {
     text-align: center;
-  }
-
-  .qwen-multiangle-param-label {
-    color: #888;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
   }
 
   .qwen-multiangle-param-value {
@@ -102,29 +108,11 @@ export const WIDGET_STYLES = `
     transform: scale(0.95);
   }
 
-  .qwen-multiangle-dropdowns {
-    position: absolute;
-    top: 40px;
-    left: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    z-index: 10;
-  }
-
-  .qwen-multiangle-dropdown {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
   .qwen-multiangle-dropdown-label {
     font-size: 9px;
     color: #888;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    min-width: 28px;
-    text-align: right;
     white-space: nowrap;
   }
 
@@ -144,12 +132,13 @@ export const WIDGET_STYLES = `
     background: rgba(10, 10, 15, 0.9);
     border: 1px solid rgba(100, 100, 120, 0.4);
     border-radius: 4px;
-    padding: 3px 6px;
-    font-size: 10px;
+    padding: 2px 4px;
+    font-size: 9px;
     color: #e0e0e0;
     cursor: pointer;
     outline: none;
-    min-width: 120px;
+    min-width: 0;
+    max-width: 90px;
     backdrop-filter: blur(4px);
   }
 
