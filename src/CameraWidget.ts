@@ -1,13 +1,5 @@
 import * as THREE from 'three'
 import type { CameraState, CameraWidgetOptions } from './types'
-import { injectStyles } from './styles'
-import { t, initI18n, type Translations } from './i18n'
-
-interface DropdownOption {
-  key: keyof Translations
-  promptKey: string
-  value: number
-}
 
 export class CameraWidget {
   private container: HTMLElement
@@ -64,43 +56,7 @@ export class CameraWidget {
   private animationId: number | null = null
   private time = 0
 
-  private canvasContainer!: HTMLElement
-  private promptEl!: HTMLElement
-  private hValueEl!: HTMLElement
-  private vValueEl!: HTMLElement
-  private zValueEl!: HTMLElement
-  private azimuthSelect!: HTMLSelectElement
-  private elevationSelect!: HTMLSelectElement
-  private distanceSelect!: HTMLSelectElement
-
-  private readonly AZIMUTH_OPTIONS: DropdownOption[] = [
-    { key: 'frontView', promptKey: 'front view', value: 0 },
-    { key: 'frontRightQuarterView', promptKey: 'front-right quarter view', value: 45 },
-    { key: 'rightSideView', promptKey: 'right side view', value: 90 },
-    { key: 'backRightQuarterView', promptKey: 'back-right quarter view', value: 135 },
-    { key: 'backView', promptKey: 'back view', value: 180 },
-    { key: 'backLeftQuarterView', promptKey: 'back-left quarter view', value: 225 },
-    { key: 'leftSideView', promptKey: 'left side view', value: 270 },
-    { key: 'frontLeftQuarterView', promptKey: 'front-left quarter view', value: 315 }
-  ]
-
-  private readonly ELEVATION_OPTIONS: DropdownOption[] = [
-    { key: 'lowAngleShot', promptKey: 'low-angle shot', value: -30 },
-    { key: 'eyeLevelShot', promptKey: 'eye-level shot', value: 0 },
-    { key: 'elevatedShot', promptKey: 'elevated shot', value: 30 },
-    { key: 'highAngleShot', promptKey: 'high-angle shot', value: 60 }
-  ]
-
-  private readonly DISTANCE_OPTIONS: DropdownOption[] = [
-    { key: 'wideShot', promptKey: 'wide shot', value: 1 },
-    { key: 'mediumShot', promptKey: 'medium shot', value: 4 },
-    { key: 'closeUp', promptKey: 'close-up', value: 8 }
-  ]
-
   constructor(options: CameraWidgetOptions) {
-    initI18n()
-    injectStyles()
-
     this.container = options.container
     this.onStateChange = options.onStateChange
     this.state = {
@@ -114,103 +70,14 @@ export class CameraWidget {
     this.liveElevation = this.state.elevation
     this.liveDistance = this.state.distance
 
-    this.createDOM()
     this.initThreeJS()
     this.bindEvents()
-    this.updateDisplay()
     this.animate()
   }
 
-  private createDOM(): void {
-    const azimuthOptionsHtml = this.AZIMUTH_OPTIONS
-      .map(opt => `<option value="${opt.value}">${t(opt.key)}</option>`)
-      .join('')
-    const elevationOptionsHtml = this.ELEVATION_OPTIONS
-      .map(opt => `<option value="${opt.value}">${t(opt.key)}</option>`)
-      .join('')
-    const distanceOptionsHtml = this.DISTANCE_OPTIONS
-      .map(opt => `<option value="${opt.value}">${t(opt.key)}</option>`)
-      .join('')
-
-    this.container.innerHTML = `
-      <div class="qwen-multiangle-container">
-        <div class="qwen-multiangle-canvas"></div>
-        <div class="qwen-multiangle-prompt">&lt;sks&gt; front view eye-level shot medium shot</div>
-        <div class="qwen-multiangle-info">
-          <div class="qwen-multiangle-info-row">
-            <div class="qwen-multiangle-control">
-              <span class="qwen-multiangle-dropdown-label azimuth">${t('horizontal')}</span>
-              <select class="qwen-multiangle-select azimuth">${azimuthOptionsHtml}</select>
-            </div>
-            <div class="qwen-multiangle-control">
-              <span class="qwen-multiangle-dropdown-label elevation">${t('vertical')}</span>
-              <select class="qwen-multiangle-select elevation">${elevationOptionsHtml}</select>
-            </div>
-            <div class="qwen-multiangle-control">
-              <span class="qwen-multiangle-dropdown-label distance">${t('zoom')}</span>
-              <select class="qwen-multiangle-select distance">${distanceOptionsHtml}</select>
-            </div>
-          </div>
-          <div class="qwen-multiangle-info-row">
-            <div class="qwen-multiangle-param">
-              <div class="qwen-multiangle-param-value azimuth">0°</div>
-            </div>
-            <div class="qwen-multiangle-param">
-              <div class="qwen-multiangle-param-value elevation">0°</div>
-            </div>
-            <div class="qwen-multiangle-param">
-              <div class="qwen-multiangle-param-value zoom">5.0</div>
-            </div>
-            <button class="qwen-multiangle-reset" title="${t('resetToDefaults')}">↺</button>
-          </div>
-        </div>
-      </div>
-    `
-
-    const containerEl = this.container.querySelector('.qwen-multiangle-container') as HTMLElement
-    this.canvasContainer = containerEl.querySelector('.qwen-multiangle-canvas') as HTMLElement
-    this.promptEl = containerEl.querySelector('.qwen-multiangle-prompt') as HTMLElement
-    this.hValueEl = containerEl.querySelector('.qwen-multiangle-param-value.azimuth') as HTMLElement
-    this.vValueEl = containerEl.querySelector('.qwen-multiangle-param-value.elevation') as HTMLElement
-    this.zValueEl = containerEl.querySelector('.qwen-multiangle-param-value.zoom') as HTMLElement
-    this.azimuthSelect = containerEl.querySelector('.qwen-multiangle-select.azimuth') as HTMLSelectElement
-    this.elevationSelect = containerEl.querySelector('.qwen-multiangle-select.elevation') as HTMLSelectElement
-    this.distanceSelect = containerEl.querySelector('.qwen-multiangle-select.distance') as HTMLSelectElement
-
-    const resetBtn = containerEl.querySelector('.qwen-multiangle-info .qwen-multiangle-reset') as HTMLButtonElement
-    resetBtn.addEventListener('click', () => this.resetToDefaults())
-
-    this.azimuthSelect.addEventListener('change', () => {
-      const value = parseInt(this.azimuthSelect.value, 10)
-      this.state.azimuth = value
-      this.liveAzimuth = value
-      this.updateVisuals()
-      this.updateDisplay()
-      this.notifyStateChange()
-    })
-
-    this.elevationSelect.addEventListener('change', () => {
-      const value = parseInt(this.elevationSelect.value, 10)
-      this.state.elevation = value
-      this.liveElevation = value
-      this.updateVisuals()
-      this.updateDisplay()
-      this.notifyStateChange()
-    })
-
-    this.distanceSelect.addEventListener('change', () => {
-      const value = parseInt(this.distanceSelect.value, 10)
-      this.state.distance = value
-      this.liveDistance = value
-      this.updateVisuals()
-      this.updateDisplay()
-      this.notifyStateChange()
-    })
-  }
-
   private initThreeJS(): void {
-    const width = this.canvasContainer.clientWidth || 300
-    const height = this.canvasContainer.clientHeight || 300
+    const width = this.container.clientWidth || 300
+    const height = this.container.clientHeight || 300
 
     this.scene = new THREE.Scene()
     this.scene.background = new THREE.Color(0x0a0a0f)
@@ -226,7 +93,7 @@ export class CameraWidget {
     this.renderer.setSize(width, height, false)
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
-    this.canvasContainer.appendChild(this.renderer.domElement)
+    this.container.appendChild(this.renderer.domElement)
 
     const canvas = this.renderer.domElement
     canvas.style.position = 'absolute'
@@ -246,7 +113,6 @@ export class CameraWidget {
     fillLight.position.set(-5, 5, -5)
     this.scene.add(fillLight)
 
-    // Grid
     this.gridHelper = new THREE.GridHelper(5, 20, 0x1a1a2e, 0x12121a)
     this.gridHelper.position.y = -0.01
     this.scene.add(this.gridHelper)
@@ -520,7 +386,7 @@ export class CameraWidget {
     const resizeObserver = new ResizeObserver(() => {
       this.onResize()
     })
-    resizeObserver.observe(this.canvasContainer)
+    resizeObserver.observe(this.container)
   }
 
   private getMousePos(event: MouseEvent): void {
@@ -576,20 +442,17 @@ export class CameraWidget {
       const sensitivity = 0.5
 
       let newAzimuth = this.orbitStartAzimuth - deltaX * sensitivity
-
       while (newAzimuth < 0) newAzimuth += 360
       while (newAzimuth >= 360) newAzimuth -= 360
       this.liveAzimuth = newAzimuth
       this.state.azimuth = Math.round(this.liveAzimuth)
 
       let newElevation = this.orbitStartElevation + deltaY * sensitivity
-
       newElevation = Math.max(-30, Math.min(60, newElevation))
       this.liveElevation = newElevation
       this.state.elevation = Math.round(this.liveElevation)
 
       this.updateVisuals()
-      this.updateDisplay()
       this.notifyStateChange()
       return
     }
@@ -636,7 +499,6 @@ export class CameraWidget {
         if (angle < 0) angle += 360
         this.liveAzimuth = Math.max(0, Math.min(360, angle))
         this.state.azimuth = Math.round(this.liveAzimuth)
-        this.updateDisplay()
         this.updateVisuals()
         this.notifyStateChange()
       }
@@ -649,7 +511,6 @@ export class CameraWidget {
         angle = Math.max(-30, Math.min(60, angle))
         this.liveElevation = angle
         this.state.elevation = Math.round(this.liveElevation)
-        this.updateDisplay()
         this.updateVisuals()
         this.notifyStateChange()
       }
@@ -657,7 +518,6 @@ export class CameraWidget {
       const newDist = 5 - this.mouse.y * 5
       this.liveDistance = Math.max(0, Math.min(10, newDist))
       this.state.distance = Math.round(this.liveDistance * 10) / 10
-      this.updateDisplay()
       this.updateVisuals()
       this.notifyStateChange()
     }
@@ -690,21 +550,18 @@ export class CameraWidget {
     event.preventDefault()
 
     const sensitivity = 0.01
-
     let newDistance = this.liveDistance - event.deltaY * sensitivity
-
     newDistance = Math.max(0, Math.min(10, newDistance))
     this.liveDistance = newDistance
     this.state.distance = Math.round(this.liveDistance * 10) / 10
 
     this.updateVisuals()
-    this.updateDisplay()
     this.notifyStateChange()
   }
 
   private onResize(): void {
-    const w = this.canvasContainer.clientWidth
-    const h = this.canvasContainer.clientHeight
+    const w = this.container.clientWidth
+    const h = this.container.clientHeight
     if (w === 0 || h === 0) return
 
     this.camera.aspect = w / h
@@ -725,7 +582,13 @@ export class CameraWidget {
     this.renderer.render(this.scene, this.activeCamera)
   }
 
-  private generatePrompt(): string {
+  private notifyStateChange(): void {
+    if (this.onStateChange) {
+      this.onStateChange({ ...this.state })
+    }
+  }
+
+  public generatePrompt(): string {
     const hAngle = this.state.azimuth % 360
 
     let hDirection: string
@@ -770,77 +633,6 @@ export class CameraWidget {
     return `<sks> ${hDirection} ${vDirection} ${distance}`
   }
 
-  private updateDisplay(): void {
-    this.hValueEl.textContent = `${Math.round(this.state.azimuth)}°`
-    this.vValueEl.textContent = `${Math.round(this.state.elevation)}°`
-    this.zValueEl.textContent = this.state.distance.toFixed(1)
-    this.promptEl.textContent = this.generatePrompt()
-    this.syncDropdowns()
-  }
-
-  private syncDropdowns(): void {
-    const azimuthValue = this.findClosestOption(this.state.azimuth, this.AZIMUTH_OPTIONS, true)
-    this.azimuthSelect.value = azimuthValue.toString()
-
-    const elevationValue = this.findClosestOption(this.state.elevation, this.ELEVATION_OPTIONS, false)
-    this.elevationSelect.value = elevationValue.toString()
-
-    const distanceValue = this.findClosestDistanceOption(this.state.distance)
-    this.distanceSelect.value = distanceValue.toString()
-  }
-
-  private findClosestOption(value: number, options: Array<{ value: number }>, isAzimuth = false): number {
-    let closest = options[0].value
-    let minDiff = Math.abs(value - options[0].value)
-
-    for (const opt of options) {
-      // Handle azimuth wrap-around (360 degrees)
-      let diff = Math.abs(value - opt.value)
-      if (isAzimuth) {
-        // Check wrap-around distance
-        const wrapDiff = Math.abs(value - opt.value - 360)
-        const wrapDiff2 = Math.abs(value - opt.value + 360)
-        diff = Math.min(diff, wrapDiff, wrapDiff2)
-      }
-
-      if (diff < minDiff) {
-        minDiff = diff
-        closest = opt.value
-      }
-    }
-
-    return closest
-  }
-
-  private findClosestDistanceOption(distance: number): number {
-    if (distance < 2) {
-      return 1
-    } else if (distance < 6) {
-      return 4
-    } else {
-      return 8
-    }
-  }
-
-  private notifyStateChange(): void {
-    if (this.onStateChange) {
-      this.onStateChange({ ...this.state })
-    }
-  }
-
-  private resetToDefaults(): void {
-    this.state.azimuth = 0
-    this.state.elevation = 0
-    this.state.distance = 5.0
-    this.liveAzimuth = 0
-    this.liveElevation = 0
-    this.liveDistance = 5.0
-    this.updateVisuals()
-    this.updateDisplay()
-    this.notifyStateChange()
-    console.log("resetToDefaults")
-  }
-
   public setState(newState: Partial<CameraState>): void {
     if (newState.azimuth !== undefined) {
       this.state.azimuth = newState.azimuth
@@ -859,7 +651,6 @@ export class CameraWidget {
       this.updateImage(newState.imageUrl)
     }
     this.updateVisuals()
-    this.updateDisplay()
   }
 
   public getState(): CameraState {
@@ -868,6 +659,17 @@ export class CameraWidget {
 
   public getPrompt(): string {
     return this.generatePrompt()
+  }
+
+  public resetToDefaults(): void {
+    this.state.azimuth = 0
+    this.state.elevation = 0
+    this.state.distance = 5.0
+    this.liveAzimuth = 0
+    this.liveElevation = 0
+    this.liveDistance = 5.0
+    this.updateVisuals()
+    this.notifyStateChange()
   }
 
   public setCameraView(enabled: boolean): void {
@@ -907,7 +709,6 @@ export class CameraWidget {
       this.glowRing.visible = true
       this.gridHelper.visible = true
       this.imageFrame.visible = true
-
       this.renderer.domElement.style.cursor = 'default'
     }
   }

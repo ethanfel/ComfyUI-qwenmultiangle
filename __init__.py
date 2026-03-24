@@ -11,6 +11,4 @@ custom_node_dir = os.path.dirname(os.path.realpath(__file__))
 js_dir = os.path.join(custom_node_dir, "js")
 nodes.EXTENSION_WEB_DIRS["ComfyUI-qwenmultiangle"] = js_dir
 
-from .nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
-
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
+from .nodes import comfy_entrypoint

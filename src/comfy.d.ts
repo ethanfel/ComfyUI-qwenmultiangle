@@ -69,6 +69,7 @@ interface ComfyAppInstance {
 
 interface ComfyApiInstance {
   addEventListener(event: string, callback: (event: CustomEvent) => void): void
+  apiURL(route: string): string
 }
 
 interface Window {

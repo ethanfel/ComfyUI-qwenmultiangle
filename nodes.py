@@ -1,119 +1,107 @@
 """
-QwenMultiangle Node for ComfyUI
+QwenMultiangle Node for ComfyUI (V3 API)
 A 3D camera control node that outputs angle prompts
 """
 
+from __future__ import annotations
+
+import os
+
 import numpy as np
 from PIL import Image
-import base64
-import io
-import hashlib
+
+import folder_paths
+from comfy_api.latest import ComfyExtension, io, UI
+from comfy_api.latest._io import _UIOutput, FolderType
+from comfy_api.latest._ui import ImageSaveHelper, SavedResult
+from typing_extensions import override
 
 
-# Module-level cache to support multiple node instances independently
-_cache = {}
-_max_cache_size = 50  # Limit cache entries to prevent memory growth
+class _WidgetPreviewImages(_UIOutput):
+    """Custom UI output that sends image metadata to our widget only,
+    without triggering ComfyUI's built-in image preview."""
+
+    def __init__(self, results: list[SavedResult]):
+        super().__init__()
+        self.results = results
+
+    def as_dict(self) -> dict:
+        return {"preview_images": self.results}
 
 
-class QwenMultiangleCameraNode:
+class QwenMultiangleCameraNode(io.ComfyNode):
     """
     3D Camera Angle Control Node
     Provides a 3D scene to adjust camera angles and outputs a formatted prompt string
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "horizontal_angle": ("INT", {
-                    "default": 0,
-                    "min": 0,
-                    "max": 360,
-                    "step": 1,
-                    "display": "slider"
-                }),
-                "vertical_angle": ("INT", {
-                    "default": 0,
-                    "min": -30,
-                    "max": 60,
-                    "step": 1,
-                    "display": "slider"
-                }),
-                "zoom": ("FLOAT", {
-                    "default": 5.0,
-                    "min": 0.0,
-                    "max": 10.0,
-                    "step": 0.1,
-                    "display": "slider"
-                }),
-                # Deprecated: this option no longer affects output, kept for backward compatibility
-                "default_prompts": ("BOOLEAN", {
-                    "default": True,
-                    "display": "checkbox"
-                }),
-                "camera_view": ("BOOLEAN", {
-                    "default": False,
-                    "display": "checkbox"
-                }),
-            },
-            "optional": {
-                "image": ("IMAGE",),
-            },
-            "hidden": {
-                "unique_id": "UNIQUE_ID",
-            }
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="QwenMultiangleCameraNode",
+            display_name="Qwen Multiangle Camera",
+            category="image/multiangle",
+            is_output_node=True,
+            description="Interactive 3D camera angle control for multi-angle image generation",
+            inputs=[
+                io.Int.Input(
+                    "horizontal_angle",
+                    default=0, min=0, max=360, step=1,
+                    display_name="Horizontal Angle",
+                    tooltip="Camera azimuth angle (0-360°)",
+                ),
+                io.Int.Input(
+                    "vertical_angle",
+                    default=0, min=-30, max=60, step=1,
+                    display_name="Vertical Angle",
+                    tooltip="Camera elevation angle (-30° to 60°)",
+                ),
+                io.Float.Input(
+                    "zoom",
+                    default=5.0, min=0.0, max=10.0, step=0.1,
+                    display_name="Zoom",
+                    tooltip="Camera distance (0=wide, 10=close-up)",
+                ),
+                io.Boolean.Input(
+                    "default_prompts",
+                    default=True,
+                    display_name="Default Prompts",
+                    tooltip="Deprecated, kept for backward compatibility",
+                ),
+                io.Boolean.Input(
+                    "camera_view",
+                    default=False,
+                    display_name="Camera View",
+                    tooltip="Toggle camera perspective preview",
+                ),
+                io.Image.Input(
+                    "image",
+                    optional=True,
+                    tooltip="Optional input image to display in the 3D scene",
+                ),
+            ],
+            outputs=[
+                io.String.Output("prompt", display_name="Prompt"),
+            ],
+            hidden=[io.Hidden.unique_id],
+        )
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("prompt",)
-    FUNCTION = "generate_prompt"
-    CATEGORY = "image/multiangle"
-    OUTPUT_NODE = True
-
-    def _compute_image_hash(self, image):
-        """Compute a hash of the image tensor for cache key comparison."""
-        if image is None:
-            return None
-        try:
-            # Get numpy array and create a hashable representation
-            if hasattr(image, 'cpu'):
-                img_tensor = image[0] if len(image.shape) == 4 else image
-                img_np = img_tensor.cpu().numpy()
-            elif hasattr(image, 'numpy'):
-                img_np = image.numpy()
-                if len(img_np.shape) == 4:
-                    img_np = img_np[0]
-            else:
-                img_np = image
-                if len(img_np.shape) == 4:
-                    img_np = img_np[0]
-            # Use bytes of the array for hashing
-            return hashlib.md5(img_np.tobytes()).hexdigest()
-        except Exception:
-            return str(hash(str(image)))
-
-    def generate_prompt(self, horizontal_angle, vertical_angle, zoom, default_prompts=True, camera_view=False, image=None, unique_id=None):
-        # Note: default_prompts is deprecated and ignored, kept for backward compatibility
-        # Validate input ranges
+    @classmethod
+    def execute(
+        cls,
+        horizontal_angle,
+        vertical_angle,
+        zoom,
+        default_prompts=True,
+        camera_view=False,
+        image=None,
+    ) -> io.NodeOutput:
         horizontal_angle = max(0, min(360, int(horizontal_angle)))
         vertical_angle = max(-30, min(60, int(vertical_angle)))
         zoom = max(0.0, min(10.0, float(zoom)))
 
-        # Check cache for unchanged inputs
-        cache_key = str(unique_id) if unique_id else "default"
-        image_hash = self._compute_image_hash(image)
-
-        cached = _cache.get(cache_key, {})
-        if (cached.get('horizontal_angle') == horizontal_angle and
-            cached.get('vertical_angle') == vertical_angle and
-            cached.get('zoom') == zoom and
-            cached.get('image_hash') == image_hash):
-            # Return cached result without recomputing
-            return cached['result']
-
         h_angle = horizontal_angle % 360
 
-        # Azimuth (horizontal) - 8 directions
         if h_angle < 22.5 or h_angle >= 337.5:
             h_direction = "front view"
         elif h_angle < 67.5:
@@ -131,7 +119,6 @@ class QwenMultiangleCameraNode:
         else:
             h_direction = "front-left quarter view"
 
-        # Elevation (vertical) - 4 levels: -30°, 0°, 30°, 60°
         if vertical_angle < -15:
             v_direction = "low-angle shot"
         elif vertical_angle < 15:
@@ -141,7 +128,6 @@ class QwenMultiangleCameraNode:
         else:
             v_direction = "high-angle shot"
 
-        # Distance - 3 levels
         if zoom < 2:
             distance = "wide shot"
         elif zoom < 6:
@@ -151,93 +137,50 @@ class QwenMultiangleCameraNode:
 
         prompt = f"<sks> {h_direction} {v_direction} {distance}"
 
-        # Convert image to base64 for frontend display
-        image_base64 = ""
+        # Save image to temp file for the frontend 3D widget
+        ui_results: list[SavedResult] = []
         if image is not None:
             try:
-                # Handle different tensor formats
-                if hasattr(image, 'cpu'):
-                    # PyTorch tensor
-                    img_tensor = image[0] if len(image.shape) == 4 else image
-                    img_np = img_tensor.cpu().numpy()
-                elif hasattr(image, 'numpy'):
-                    # Already numpy or tensor with numpy method
-                    img_np = image.numpy()
-                    if len(img_np.shape) == 4:
-                        img_np = img_np[0]
-                else:
-                    # Assume numpy array
-                    img_np = image
-                    if len(img_np.shape) == 4:
-                        img_np = img_np[0]
+                unique_id = cls.hidden.unique_id if cls.hidden else "preview"
+                prefix = f"qwen_multiangle_{unique_id}_"
+                ui_results = ImageSaveHelper.save_images(
+                    image[:1],
+                    filename_prefix=prefix,
+                    folder_type=FolderType.temp,
+                    cls=None,
+                    compress_level=1,
+                )
+            except Exception as e:
+                print(f"[QwenMultiangle] Error saving preview image: {e}")
 
-                # Convert to uint8 and create PIL image
-                img_np = (np.clip(img_np, 0, 1) * 255).astype(np.uint8)
-
-                # Handle different channel orders (HWC, CHW, etc.)
-                if img_np.ndim == 3:
-                    if img_np.shape[0] in (1, 3, 4):  # CHW format
-                        img_np = np.transpose(img_np, (1, 2, 0))
-                    if img_np.shape[-1] == 1:  # Grayscale
-                        img_np = np.concatenate([img_np] * 3, axis=-1)
-                    elif img_np.shape[-1] == 4:  # RGBA, convert to RGB
-                        img_np = img_np[..., :3]
-
-                pil_image = Image.fromarray(img_np)
-                buffer = io.BytesIO()
-                pil_image.save(buffer, format="PNG")
-                image_base64 = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("utf-8")
-            except Exception:
-                # Silently fail on image conversion errors
-                pass
-
-        result = {"ui": {"image_base64": [image_base64]}, "result": (prompt,)}
-
-        # Cache the result
-        _cache[cache_key] = {
-            'horizontal_angle': horizontal_angle,
-            'vertical_angle': vertical_angle,
-            'zoom': zoom,
-            'image_hash': image_hash,
-            'result': result
-        }
-
-        # Limit cache size to prevent memory growth
-        if len(_cache) > _max_cache_size:
-            # Remove oldest entries
-            keys_to_remove = list(_cache.keys())[:len(_cache) - _max_cache_size]
-            for key in keys_to_remove:
-                del _cache[key]
-
-        return result
+        return io.NodeOutput(prompt, ui=_WidgetPreviewImages(ui_results))
 
     @classmethod
-    def IS_CHANGED(cls, horizontal_angle, vertical_angle, zoom, default_prompts=True, camera_view=False, image=None, unique_id=None):
-        # Return a hash of inputs so node only re-runs when inputs actually change
-        try:
-            img_hash = ""
-            if image is not None:
-                if hasattr(image, 'cpu'):
-                    img_tensor = image[0] if len(image.shape) == 4 else image
-                    img_np = img_tensor.cpu().numpy()
-                elif hasattr(image, 'numpy'):
-                    img_np = image.numpy()
-                    if len(img_np.shape) == 4:
-                        img_np = img_np[0]
-                else:
-                    img_np = image
-                    if len(img_np.shape) == 4:
-                        img_np = img_np[0]
-                img_hash = hashlib.md5(img_np.tobytes()).hexdigest()
-            return f"{horizontal_angle}_{vertical_angle}_{zoom}_{img_hash}"
-        except Exception:
-            return f"{horizontal_angle}_{vertical_angle}_{zoom}"
+    def fingerprint_inputs(
+        cls,
+        horizontal_angle,
+        vertical_angle,
+        zoom,
+        default_prompts=True,
+        camera_view=False,
+        image=None,
+    ):
+        parts = [str(horizontal_angle), str(vertical_angle), str(zoom)]
+        if image is not None:
+            parts.append(str(image.shape))
+            try:
+                parts.append(f"{image[0, 0, 0, 0].item():.6f}")
+                parts.append(f"{image[0, -1, -1, -1].item():.6f}")
+            except Exception:
+                parts.append(str(id(image)))
+        return "_".join(parts)
 
 
-NODE_CLASS_MAPPINGS = {
-    "QwenMultiangleCameraNode": QwenMultiangleCameraNode,
-}
+class QwenMultiangleExtension(ComfyExtension):
+    @override
+    async def get_node_list(self):
+        return [QwenMultiangleCameraNode]
 
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "QwenMultiangleCameraNode": "Qwen Multiangle Camera",
-}
+
+async def comfy_entrypoint():
+    return QwenMultiangleExtension()

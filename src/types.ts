@@ -6,10 +6,16 @@ export interface CameraState {
 }
 
 export interface CameraWidgetOptions {
-  node: ComfyNode
   container: HTMLElement
   initialState?: Partial<CameraState>
   onStateChange?: (state: CameraState) => void
+}
+
+export interface AppExposed {
+  updateImage: (url: string | null) => void
+  setCameraView: (enabled: boolean) => void
+  setState: (state: Partial<CameraState>) => void
+  cleanup: () => void
 }
 
 export type QwenMultiangleNode = ComfyNode

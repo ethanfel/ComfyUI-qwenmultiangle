@@ -1,11 +1,16 @@
 import { defineConfig } from 'vite'
 import { resolve } from 'path'
+import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
+  plugins: [vue()],
   resolve: {
     alias: {
       '@': resolve(__dirname, './src')
     }
+  },
+  define: {
+    'process.env.NODE_ENV': JSON.stringify('production')
   },
   build: {
     lib: {
@@ -21,11 +26,12 @@ export default defineConfig({
       output: {
         dir: 'js',
         entryFileNames: 'main.js',
-        chunkFileNames: 'assets/[name]-[hash].js',
-        assetFileNames: 'assets/[name]-[hash][extname]'
+        chunkFileNames: 'assets/[name].js',
+        assetFileNames: 'assets/[name][extname]'
       }
     },
     sourcemap: true,
-    minify: false
+    minify: false,
+    cssCodeSplit: false
   }
 })
