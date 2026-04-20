@@ -27376,92 +27376,112 @@ const { api } = window.comfyAPI.api;
   link.href = cssUrl;
   document.head.appendChild(link);
 })();
-const widgetInstances = /* @__PURE__ */ new Map();
-function createCameraWidget(node) {
+const instances = /* @__PURE__ */ new Map();
+const CLEANUP_DELAY_MS = 200;
+function getWidgetValue(node, name, defaultValue) {
+  var _a;
+  const widget = (_a = node.widgets) == null ? void 0 : _a.find((w) => w.name === name);
+  return widget ? Number(widget.value) : defaultValue;
+}
+function readStateFromNode(node) {
+  return {
+    azimuth: getWidgetValue(node, "horizontal_angle", 0),
+    elevation: getWidgetValue(node, "vertical_angle", 0),
+    distance: getWidgetValue(node, "zoom", 5)
+  };
+}
+function createInstance(node) {
   const container = document.createElement("div");
   container.id = `qwen-multiangle-widget-${node.id}`;
   container.style.width = "100%";
   container.style.height = "100%";
   container.style.minHeight = "350px";
-  const getWidgetValue = (name, defaultValue) => {
+  const instance = {};
+  instance.container = container;
+  instance.currentNode = node;
+  instance.widget = null;
+  instance.cleanupTimer = null;
+  const vueApp = createApp(App, {
+    initialState: readStateFromNode(node),
+    onStateChange: (state) => {
+      var _a, _b, _c, _d;
+      const live = instance.currentNode;
+      const h = (_a = live.widgets) == null ? void 0 : _a.find((w) => w.name === "horizontal_angle");
+      const v = (_b = live.widgets) == null ? void 0 : _b.find((w) => w.name === "vertical_angle");
+      const z = (_c = live.widgets) == null ? void 0 : _c.find((w) => w.name === "zoom");
+      if (h) h.value = state.azimuth;
+      if (v) v.value = state.elevation;
+      if (z) z.value = state.distance;
+      (_d = app.graph) == null ? void 0 : _d.setDirtyCanvas(true, true);
+    }
+  });
+  const mounted = vueApp.mount(container);
+  instance.vueApp = vueApp;
+  instance.exposed = mounted;
+  instances.set(node.id, instance);
+  return instance;
+}
+function bindWidgetCallbacks(node, exposed) {
+  const wire = (name, apply2) => {
     var _a;
-    const widget2 = (_a = node.widgets) == null ? void 0 : _a.find((w) => w.name === name);
-    return widget2 ? Number(widget2.value) : defaultValue;
+    const w = (_a = node.widgets) == null ? void 0 : _a.find((widget) => widget.name === name);
+    if (!w) return;
+    const origCallback = w.callback;
+    w.callback = (value) => {
+      origCallback == null ? void 0 : origCallback.call(w, value);
+      apply2(value);
+    };
   };
-  const initialState = {
-    azimuth: getWidgetValue("horizontal_angle", 0),
-    elevation: getWidgetValue("vertical_angle", 0),
-    distance: getWidgetValue("zoom", 5)
-  };
+  wire("horizontal_angle", (v) => exposed.setState({ azimuth: Number(v) }));
+  wire("vertical_angle", (v) => exposed.setState({ elevation: Number(v) }));
+  wire("zoom", (v) => exposed.setState({ distance: Number(v) }));
+  wire("camera_view", (v) => exposed.setCameraView(Boolean(v)));
+}
+function createCameraWidget(node) {
+  var _a, _b, _c;
+  let instance = instances.get(node.id);
+  if (instance) {
+    if (instance.cleanupTimer !== null) {
+      clearTimeout(instance.cleanupTimer);
+      instance.cleanupTimer = null;
+    }
+    instance.currentNode = node;
+    instance.exposed.setState(readStateFromNode(node));
+    const cv = (_a = node.widgets) == null ? void 0 : _a.find((w) => w.name === "camera_view");
+    instance.exposed.setCameraView(Boolean(cv == null ? void 0 : cv.value));
+  } else {
+    instance = createInstance(node);
+    const cv = (_b = node.widgets) == null ? void 0 : _b.find((w) => w.name === "camera_view");
+    if (cv && Boolean(cv.value)) {
+      instance.exposed.setCameraView(true);
+    }
+  }
   const widget = node.addDOMWidget(
     "camera_preview",
     "qwen-multiangle",
-    container,
+    instance.container,
     {
       getMinHeight: () => 370,
       hideOnZoom: false,
       serialize: false
     }
   );
-  setTimeout(() => {
-    var _a;
-    const vueApp = createApp(App, {
-      initialState,
-      onStateChange: (state) => {
-        var _a2, _b, _c, _d;
-        const hWidget = (_a2 = node.widgets) == null ? void 0 : _a2.find((w) => w.name === "horizontal_angle");
-        const vWidget = (_b = node.widgets) == null ? void 0 : _b.find((w) => w.name === "vertical_angle");
-        const zWidget = (_c = node.widgets) == null ? void 0 : _c.find((w) => w.name === "zoom");
-        if (hWidget) hWidget.value = state.azimuth;
-        if (vWidget) vWidget.value = state.elevation;
-        if (zWidget) zWidget.value = state.distance;
-        (_d = app.graph) == null ? void 0 : _d.setDirtyCanvas(true, true);
-      }
-    });
-    const instance = vueApp.mount(container);
-    const exposed = instance;
-    widgetInstances.set(node.id, { unmount: () => vueApp.unmount(), exposed });
-    const setupWidgetSync = (widgetName) => {
-      var _a2;
-      const w = (_a2 = node.widgets) == null ? void 0 : _a2.find((widget2) => widget2.name === widgetName);
-      if (w) {
-        const origCallback = w.callback;
-        w.callback = (value) => {
-          if (origCallback) {
-            origCallback.call(w, value);
-          }
-          const inst = widgetInstances.get(node.id);
-          if (!inst) return;
-          if (widgetName === "horizontal_angle") {
-            inst.exposed.setState({ azimuth: Number(value) });
-          } else if (widgetName === "vertical_angle") {
-            inst.exposed.setState({ elevation: Number(value) });
-          } else if (widgetName === "zoom") {
-            inst.exposed.setState({ distance: Number(value) });
-          } else if (widgetName === "camera_view") {
-            inst.exposed.setCameraView(Boolean(value));
-          }
-        };
-      }
-    };
-    setupWidgetSync("horizontal_angle");
-    setupWidgetSync("vertical_angle");
-    setupWidgetSync("zoom");
-    setupWidgetSync("camera_view");
-    const cameraViewWidget = (_a = node.widgets) == null ? void 0 : _a.find((w) => w.name === "camera_view");
-    if (cameraViewWidget && Boolean(cameraViewWidget.value)) {
-      exposed.setCameraView(true);
-    }
-  }, 100);
+  instance.widget = widget;
+  bindWidgetCallbacks(node, instance.exposed);
+  const baseOnRemove = (_c = widget.onRemove) == null ? void 0 : _c.bind(widget);
   widget.onRemove = () => {
-    const inst = widgetInstances.get(node.id);
-    if (inst) {
-      inst.exposed.cleanup();
-      inst.unmount();
-      widgetInstances.delete(node.id);
-    }
+    baseOnRemove == null ? void 0 : baseOnRemove();
+    const current = instances.get(node.id);
+    if (!current || current.widget !== widget) return;
+    current.cleanupTimer = window.setTimeout(() => {
+      const still = instances.get(node.id);
+      if (!still || still.widget !== widget) return;
+      still.exposed.cleanup();
+      still.vueApp.unmount();
+      instances.delete(node.id);
+    }, CLEANUP_DELAY_MS);
   };
-  return { widget };
+  return widget;
 }
 function setupImageInput(node) {
   const originalOnConnectionsChange = node.onConnectionsChange;
@@ -27470,11 +27490,31 @@ function setupImageInput(node) {
       originalOnConnectionsChange.call(this, slotType, slotIndex, isConnected, link, ioSlot);
     }
     if (slotType === 1 && slotIndex === 0) {
-      const inst = widgetInstances.get(node.id);
+      const inst = instances.get(node.id);
       if (inst && !isConnected) {
         inst.exposed.updateImage(null);
       }
     }
+  };
+}
+function applyPreviewImageFromOutput(instance, output) {
+  if (!output || typeof output !== "object") return;
+  const images = output.preview_images;
+  if (!images || images.length === 0) return;
+  const img = images[0];
+  const params = new URLSearchParams({
+    filename: img.filename,
+    subfolder: img.subfolder,
+    type: img.type
+  });
+  const url = api.apiURL(`/view?${params.toString()}`);
+  instance.exposed.updateImage(url);
+}
+function setupOnExecuted(node, instance) {
+  const originalOnExecuted = node.onExecuted;
+  node.onExecuted = function(output) {
+    originalOnExecuted == null ? void 0 : originalOnExecuted.call(this, output);
+    applyPreviewImageFromOutput(instance, output);
   };
 }
 app.registerExtension({
@@ -27488,29 +27528,8 @@ app.registerExtension({
     node.setSize([Math.max(oldWidth, 350), Math.max(oldHeight, 520)]);
     createCameraWidget(node);
     setupImageInput(node);
-  }
-});
-api.addEventListener("executed", (event) => {
-  var _a;
-  const detail = event.detail;
-  if (!(detail == null ? void 0 : detail.node) || !(detail == null ? void 0 : detail.output)) return;
-  const nodeId = parseInt(detail.node, 10);
-  const inst = widgetInstances.get(nodeId);
-  if (!inst) return;
-  console.log("[QwenMultiangle] executed event, output:", JSON.stringify(detail.output));
-  const images = (_a = detail.output) == null ? void 0 : _a.preview_images;
-  if (images && images.length > 0) {
-    const img = images[0];
-    const params = new URLSearchParams({
-      filename: img.filename,
-      subfolder: img.subfolder,
-      type: img.type
-    });
-    const url = api.apiURL(`/view?${params.toString()}`);
-    console.log("[QwenMultiangle] Loading image from URL:", url);
-    inst.exposed.updateImage(url);
-  } else {
-    console.log("[QwenMultiangle] No images in output");
+    const inst = instances.get(node.id);
+    if (inst) setupOnExecuted(node, inst);
   }
 });
 //# sourceMappingURL=main.js.map

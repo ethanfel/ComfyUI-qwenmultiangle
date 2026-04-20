@@ -1,4 +1,4 @@
-import { createApp } from 'vue'
+import { createApp, type App as VueApp } from 'vue'
 
 const { app } = window.comfyAPI.app
 const { api } = window.comfyAPI.api
@@ -15,32 +15,114 @@ import type { CameraState, AppExposed, QwenMultiangleNode } from './types'
   document.head.appendChild(link)
 })()
 
-// Store Vue app instances for cleanup and external access
-const widgetInstances = new Map<number, { unmount: () => void; exposed: AppExposed }>()
+interface QwenInstance {
+  container: HTMLElement
+  vueApp: VueApp
+  exposed: AppExposed
+  currentNode: QwenMultiangleNode
+  widget: DOMWidgetInstance | null
+  cleanupTimer: number | null
+}
 
-function createCameraWidget(node: QwenMultiangleNode): { widget: DOMWidgetInstance } {
+const instances = new Map<number, QwenInstance>()
+
+const CLEANUP_DELAY_MS = 200
+
+function getWidgetValue(
+  node: QwenMultiangleNode,
+  name: string,
+  defaultValue: number
+): number {
+  const widget = node.widgets?.find(w => w.name === name)
+  return widget ? Number(widget.value) : defaultValue
+}
+
+function readStateFromNode(node: QwenMultiangleNode): Partial<CameraState> {
+  return {
+    azimuth: getWidgetValue(node, 'horizontal_angle', 0),
+    elevation: getWidgetValue(node, 'vertical_angle', 0),
+    distance: getWidgetValue(node, 'zoom', 5.0)
+  }
+}
+
+function createInstance(node: QwenMultiangleNode): QwenInstance {
   const container = document.createElement('div')
   container.id = `qwen-multiangle-widget-${node.id}`
   container.style.width = '100%'
   container.style.height = '100%'
   container.style.minHeight = '350px'
 
-  const getWidgetValue = (name: string, defaultValue: number): number => {
-    const widget = node.widgets?.find(w => w.name === name)
-    return widget ? Number(widget.value) : defaultValue
+  const instance = {} as QwenInstance
+  instance.container = container
+  instance.currentNode = node
+  instance.widget = null
+  instance.cleanupTimer = null
+
+  const vueApp = createApp(App, {
+    initialState: readStateFromNode(node),
+    onStateChange: (state: CameraState) => {
+      const live = instance.currentNode
+      const h = live.widgets?.find(w => w.name === 'horizontal_angle')
+      const v = live.widgets?.find(w => w.name === 'vertical_angle')
+      const z = live.widgets?.find(w => w.name === 'zoom')
+      if (h) h.value = state.azimuth
+      if (v) v.value = state.elevation
+      if (z) z.value = state.distance
+      app.graph?.setDirtyCanvas(true, true)
+    }
+  })
+  const mounted = vueApp.mount(container)
+  instance.vueApp = vueApp
+  instance.exposed = mounted as unknown as AppExposed
+
+  instances.set(node.id, instance)
+  return instance
+}
+
+function bindWidgetCallbacks(
+  node: QwenMultiangleNode,
+  exposed: AppExposed
+): void {
+  const wire = (name: string, apply: (value: unknown) => void) => {
+    const w = node.widgets?.find(widget => widget.name === name)
+    if (!w) return
+    const origCallback = w.callback
+    w.callback = (value: unknown) => {
+      origCallback?.call(w, value)
+      apply(value)
+    }
   }
 
-  const initialState: Partial<CameraState> = {
-    azimuth: getWidgetValue('horizontal_angle', 0),
-    elevation: getWidgetValue('vertical_angle', 0),
-    distance: getWidgetValue('zoom', 5.0)
+  wire('horizontal_angle', v => exposed.setState({ azimuth: Number(v) }))
+  wire('vertical_angle', v => exposed.setState({ elevation: Number(v) }))
+  wire('zoom', v => exposed.setState({ distance: Number(v) }))
+  wire('camera_view', v => exposed.setCameraView(Boolean(v)))
+}
+
+function createCameraWidget(node: QwenMultiangleNode): DOMWidgetInstance {
+  let instance = instances.get(node.id)
+
+  if (instance) {
+    if (instance.cleanupTimer !== null) {
+      clearTimeout(instance.cleanupTimer)
+      instance.cleanupTimer = null
+    }
+    instance.currentNode = node
+    instance.exposed.setState(readStateFromNode(node))
+    const cv = node.widgets?.find(w => w.name === 'camera_view')
+    instance.exposed.setCameraView(Boolean(cv?.value))
+  } else {
+    instance = createInstance(node)
+    const cv = node.widgets?.find(w => w.name === 'camera_view')
+    if (cv && Boolean(cv.value)) {
+      instance.exposed.setCameraView(true)
+    }
   }
 
-  // Create DOM widget
   const widget = node.addDOMWidget(
     'camera_preview',
     'qwen-multiangle',
-    container,
+    instance.container,
     {
       getMinHeight: () => 370,
       hideOnZoom: false,
@@ -48,73 +130,26 @@ function createCameraWidget(node: QwenMultiangleNode): { widget: DOMWidgetInstan
     }
   )
 
-  setTimeout(() => {
-    const vueApp = createApp(App, {
-      initialState,
-      onStateChange: (state: CameraState) => {
-        const hWidget = node.widgets?.find(w => w.name === 'horizontal_angle')
-        const vWidget = node.widgets?.find(w => w.name === 'vertical_angle')
-        const zWidget = node.widgets?.find(w => w.name === 'zoom')
+  instance.widget = widget
+  bindWidgetCallbacks(node, instance.exposed)
 
-        if (hWidget) hWidget.value = state.azimuth
-        if (vWidget) vWidget.value = state.elevation
-        if (zWidget) zWidget.value = state.distance
-
-        app.graph?.setDirtyCanvas(true, true)
-      }
-    })
-
-    const instance = vueApp.mount(container)
-    const exposed = instance as unknown as AppExposed
-
-    widgetInstances.set(node.id, { unmount: () => vueApp.unmount(), exposed })
-
-    const setupWidgetSync = (widgetName: string) => {
-      const w = node.widgets?.find(widget => widget.name === widgetName)
-      if (w) {
-        const origCallback = w.callback
-        w.callback = (value: unknown) => {
-          if (origCallback) {
-            origCallback.call(w, value)
-          }
-
-          const inst = widgetInstances.get(node.id)
-          if (!inst) return
-
-          if (widgetName === 'horizontal_angle') {
-            inst.exposed.setState({ azimuth: Number(value) })
-          } else if (widgetName === 'vertical_angle') {
-            inst.exposed.setState({ elevation: Number(value) })
-          } else if (widgetName === 'zoom') {
-            inst.exposed.setState({ distance: Number(value) })
-          } else if (widgetName === 'camera_view') {
-            inst.exposed.setCameraView(Boolean(value))
-          }
-        }
-      }
-    }
-
-    setupWidgetSync('horizontal_angle')
-    setupWidgetSync('vertical_angle')
-    setupWidgetSync('zoom')
-    setupWidgetSync('camera_view')
-
-    const cameraViewWidget = node.widgets?.find(w => w.name === 'camera_view')
-    if (cameraViewWidget && Boolean(cameraViewWidget.value)) {
-      exposed.setCameraView(true)
-    }
-  }, 100)
-
+  const baseOnRemove = widget.onRemove?.bind(widget)
   widget.onRemove = () => {
-    const inst = widgetInstances.get(node.id)
-    if (inst) {
-      inst.exposed.cleanup()
-      inst.unmount()
-      widgetInstances.delete(node.id)
-    }
+    baseOnRemove?.()
+
+    const current = instances.get(node.id)
+    if (!current || current.widget !== widget) return
+
+    current.cleanupTimer = window.setTimeout(() => {
+      const still = instances.get(node.id)
+      if (!still || still.widget !== widget) return
+      still.exposed.cleanup()
+      still.vueApp.unmount()
+      instances.delete(node.id)
+    }, CLEANUP_DELAY_MS)
   }
 
-  return { widget }
+  return widget
 }
 
 function setupImageInput(node: QwenMultiangleNode): void {
@@ -132,11 +167,38 @@ function setupImageInput(node: QwenMultiangleNode): void {
     }
 
     if (slotType === 1 && slotIndex === 0) {
-      const inst = widgetInstances.get(node.id)
+      const inst = instances.get(node.id)
       if (inst && !isConnected) {
         inst.exposed.updateImage(null)
       }
     }
+  }
+}
+
+type PreviewImage = { filename: string; subfolder: string; type: string }
+
+function applyPreviewImageFromOutput(
+  instance: QwenInstance,
+  output: unknown
+): void {
+  if (!output || typeof output !== 'object') return
+  const images = (output as { preview_images?: PreviewImage[] }).preview_images
+  if (!images || images.length === 0) return
+  const img = images[0]
+  const params = new URLSearchParams({
+    filename: img.filename,
+    subfolder: img.subfolder,
+    type: img.type
+  })
+  const url = api.apiURL(`/view?${params.toString()}`)
+  instance.exposed.updateImage(url)
+}
+
+function setupOnExecuted(node: QwenMultiangleNode, instance: QwenInstance): void {
+  const originalOnExecuted = node.onExecuted
+  node.onExecuted = function(output: unknown) {
+    originalOnExecuted?.call(this, output)
+    applyPreviewImageFromOutput(instance, output)
   }
 }
 
@@ -153,29 +215,7 @@ app.registerExtension({
 
     createCameraWidget(node)
     setupImageInput(node)
-  }
-})
-
-// Listen for node execution results
-api.addEventListener('executed', (event: CustomEvent) => {
-  const detail = event.detail
-  if (!detail?.node || !detail?.output) return
-
-  const nodeId = parseInt(detail.node, 10)
-  const inst = widgetInstances.get(nodeId)
-  if (!inst) return
-
-  const images = detail.output?.preview_images as Array<{ filename: string; subfolder: string; type: string }> | undefined
-  if (images && images.length > 0) {
-    const img = images[0]
-    const params = new URLSearchParams({
-      filename: img.filename,
-      subfolder: img.subfolder,
-      type: img.type
-    })
-    const url = api.apiURL(`/view?${params.toString()}`)
-    inst.exposed.updateImage(url)
-  } else {
-    console.log('[QwenMultiangle] No images in output')
+    const inst = instances.get(node.id)
+    if (inst) setupOnExecuted(node, inst)
   }
 })

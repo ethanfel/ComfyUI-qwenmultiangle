@@ -35,6 +35,7 @@ interface ComfyNode {
     link: unknown,
     ioSlot: unknown
   ) => void
+  onExecuted?: (output: unknown) => void
 }
 
 interface DOMWidgetInstance {
