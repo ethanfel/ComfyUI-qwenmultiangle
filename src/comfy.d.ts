@@ -16,6 +16,7 @@ interface ComfyNode {
   id: number
   size: [number, number]
   widgets?: ComfyWidget[]
+  properties?: Record<string, unknown>
   constructor: Function & { comfyClass?: string }
   setSize(size: [number, number]): void
   addDOMWidget(
@@ -36,6 +37,7 @@ interface ComfyNode {
     ioSlot: unknown
   ) => void
   onExecuted?: (output: unknown) => void
+  onPropertyChanged?: (key: string, value: unknown) => void
 }
 
 interface DOMWidgetInstance {

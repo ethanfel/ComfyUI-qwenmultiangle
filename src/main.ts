@@ -24,9 +24,29 @@ interface QwenInstance {
   cleanupTimer: number | null
 }
 
+// Keyed by node.id so undo/redo can re-attach to the existing Vue app/
+// container: when a node is removed then restored, its object reference
+// changes but node.id is preserved. Hooks that run AFTER node.id has
+// stabilised (widget callbacks, onRemove, onConnectionsChange) can look up
+// by id. Hooks that may run while id is still mutating (e.g. during
+// configure()) must capture the instance by closure instead — see
+// setupOnPropertyChanged.
 const instances = new Map<number, QwenInstance>()
 
 const CLEANUP_DELAY_MS = 200
+
+// Store the scene state on node.properties as well as on widgets. Properties
+// are deserialised by LGraphNode.configure before widgets and survive reloads
+// independently, so when the widget-sync timing is unreliable the property
+// remains authoritative.
+const PROP_KEY = 'qwenCameraState'
+
+interface StoredCameraState {
+  azimuth: number
+  elevation: number
+  distance: number
+  cameraView: boolean
+}
 
 function getWidgetValue(
   node: QwenMultiangleNode,
@@ -37,12 +57,49 @@ function getWidgetValue(
   return widget ? Number(widget.value) : defaultValue
 }
 
+function readStoredProps(node: QwenMultiangleNode): Partial<StoredCameraState> | null {
+  const raw = node.properties?.[PROP_KEY]
+  if (!raw || typeof raw !== 'object') return null
+  return raw as Partial<StoredCameraState>
+}
+
+function writeStoredProps(
+  node: QwenMultiangleNode,
+  patch: Partial<StoredCameraState>
+): void {
+  if (!node.properties) node.properties = {}
+  const existing = (node.properties[PROP_KEY] as Partial<StoredCameraState>) ?? {}
+  node.properties[PROP_KEY] = { ...existing, ...patch }
+}
+
 function readStateFromNode(node: QwenMultiangleNode): Partial<CameraState> {
+  const stored = readStoredProps(node)
   return {
-    azimuth: getWidgetValue(node, 'horizontal_angle', 0),
-    elevation: getWidgetValue(node, 'vertical_angle', 0),
-    distance: getWidgetValue(node, 'zoom', 5.0)
+    azimuth: stored?.azimuth ?? getWidgetValue(node, 'horizontal_angle', 0),
+    elevation: stored?.elevation ?? getWidgetValue(node, 'vertical_angle', 0),
+    distance: stored?.distance ?? getWidgetValue(node, 'zoom', 5.0)
   }
+}
+
+function readCameraViewFromNode(node: QwenMultiangleNode): boolean {
+  const stored = readStoredProps(node)
+  if (stored?.cameraView !== undefined) return Boolean(stored.cameraView)
+  const w = node.widgets?.find(w => w.name === 'camera_view')
+  return Boolean(w?.value)
+}
+
+function syncWidgetsFromState(
+  node: QwenMultiangleNode,
+  state: Partial<StoredCameraState>
+): void {
+  const h = node.widgets?.find(w => w.name === 'horizontal_angle')
+  const v = node.widgets?.find(w => w.name === 'vertical_angle')
+  const z = node.widgets?.find(w => w.name === 'zoom')
+  const cv = node.widgets?.find(w => w.name === 'camera_view')
+  if (state.azimuth !== undefined && h) h.value = state.azimuth
+  if (state.elevation !== undefined && v) v.value = state.elevation
+  if (state.distance !== undefined && z) z.value = state.distance
+  if (state.cameraView !== undefined && cv) cv.value = state.cameraView
 }
 
 function createInstance(node: QwenMultiangleNode): QwenInstance {
@@ -62,12 +119,16 @@ function createInstance(node: QwenMultiangleNode): QwenInstance {
     initialState: readStateFromNode(node),
     onStateChange: (state: CameraState) => {
       const live = instance.currentNode
-      const h = live.widgets?.find(w => w.name === 'horizontal_angle')
-      const v = live.widgets?.find(w => w.name === 'vertical_angle')
-      const z = live.widgets?.find(w => w.name === 'zoom')
-      if (h) h.value = state.azimuth
-      if (v) v.value = state.elevation
-      if (z) z.value = state.distance
+      syncWidgetsFromState(live, {
+        azimuth: state.azimuth,
+        elevation: state.elevation,
+        distance: state.distance
+      })
+      writeStoredProps(live, {
+        azimuth: state.azimuth,
+        elevation: state.elevation,
+        distance: state.distance
+      })
       app.graph?.setDirtyCanvas(true, true)
     }
   })
@@ -93,10 +154,26 @@ function bindWidgetCallbacks(
     }
   }
 
-  wire('horizontal_angle', v => exposed.setState({ azimuth: Number(v) }))
-  wire('vertical_angle', v => exposed.setState({ elevation: Number(v) }))
-  wire('zoom', v => exposed.setState({ distance: Number(v) }))
-  wire('camera_view', v => exposed.setCameraView(Boolean(v)))
+  wire('horizontal_angle', v => {
+    const azimuth = Number(v)
+    exposed.setState({ azimuth })
+    writeStoredProps(node, { azimuth })
+  })
+  wire('vertical_angle', v => {
+    const elevation = Number(v)
+    exposed.setState({ elevation })
+    writeStoredProps(node, { elevation })
+  })
+  wire('zoom', v => {
+    const distance = Number(v)
+    exposed.setState({ distance })
+    writeStoredProps(node, { distance })
+  })
+  wire('camera_view', v => {
+    const cameraView = Boolean(v)
+    exposed.setCameraView(cameraView)
+    writeStoredProps(node, { cameraView })
+  })
 }
 
 function createCameraWidget(node: QwenMultiangleNode): DOMWidgetInstance {
@@ -109,12 +186,10 @@ function createCameraWidget(node: QwenMultiangleNode): DOMWidgetInstance {
     }
     instance.currentNode = node
     instance.exposed.setState(readStateFromNode(node))
-    const cv = node.widgets?.find(w => w.name === 'camera_view')
-    instance.exposed.setCameraView(Boolean(cv?.value))
+    instance.exposed.setCameraView(readCameraViewFromNode(node))
   } else {
     instance = createInstance(node)
-    const cv = node.widgets?.find(w => w.name === 'camera_view')
-    if (cv && Boolean(cv.value)) {
+    if (readCameraViewFromNode(node)) {
       instance.exposed.setCameraView(true)
     }
   }
@@ -202,6 +277,37 @@ function setupOnExecuted(node: QwenMultiangleNode, instance: QwenInstance): void
   }
 }
 
+// LGraphNode.configure() fires onPropertyChanged for every restored property
+// during workflow load. Use it to push the persisted camera state into the 3D
+// scene and the number widgets — nodeCreated is too early to read them.
+//
+// The instance must be captured by closure, not looked up via instances.get:
+// onPropertyChanged fires during configure(), which is exactly when node.id
+// is transitioning from its constructor default (-1) to the serialised id,
+// so a map lookup by current id would miss the entry registered under -1.
+function setupOnPropertyChanged(
+  node: QwenMultiangleNode,
+  instance: QwenInstance
+): void {
+  const originalOnPropertyChanged = node.onPropertyChanged
+  node.onPropertyChanged = function(key: string, value: unknown) {
+    originalOnPropertyChanged?.call(this, key, value)
+    if (key !== PROP_KEY) return
+    if (!value || typeof value !== 'object') return
+
+    const state = value as Partial<StoredCameraState>
+    instance.exposed.setState({
+      azimuth: state.azimuth,
+      elevation: state.elevation,
+      distance: state.distance
+    })
+    if (state.cameraView !== undefined) {
+      instance.exposed.setCameraView(Boolean(state.cameraView))
+    }
+    syncWidgetsFromState(node, state)
+  }
+}
+
 app.registerExtension({
   name: 'ComfyUI.QwenMultiangle',
 
@@ -216,6 +322,9 @@ app.registerExtension({
     createCameraWidget(node)
     setupImageInput(node)
     const inst = instances.get(node.id)
-    if (inst) setupOnExecuted(node, inst)
+    if (inst) {
+      setupOnExecuted(node, inst)
+      setupOnPropertyChanged(node, inst)
+    }
   }
 })

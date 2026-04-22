@@ -27378,17 +27378,48 @@ const { api } = window.comfyAPI.api;
 })();
 const instances = /* @__PURE__ */ new Map();
 const CLEANUP_DELAY_MS = 200;
+const PROP_KEY = "qwenCameraState";
 function getWidgetValue(node, name, defaultValue) {
   var _a;
   const widget = (_a = node.widgets) == null ? void 0 : _a.find((w) => w.name === name);
   return widget ? Number(widget.value) : defaultValue;
 }
+function readStoredProps(node) {
+  var _a;
+  const raw = (_a = node.properties) == null ? void 0 : _a[PROP_KEY];
+  if (!raw || typeof raw !== "object") return null;
+  return raw;
+}
+function writeStoredProps(node, patch) {
+  if (!node.properties) node.properties = {};
+  const existing = node.properties[PROP_KEY] ?? {};
+  node.properties[PROP_KEY] = { ...existing, ...patch };
+}
 function readStateFromNode(node) {
+  const stored = readStoredProps(node);
   return {
-    azimuth: getWidgetValue(node, "horizontal_angle", 0),
-    elevation: getWidgetValue(node, "vertical_angle", 0),
-    distance: getWidgetValue(node, "zoom", 5)
+    azimuth: (stored == null ? void 0 : stored.azimuth) ?? getWidgetValue(node, "horizontal_angle", 0),
+    elevation: (stored == null ? void 0 : stored.elevation) ?? getWidgetValue(node, "vertical_angle", 0),
+    distance: (stored == null ? void 0 : stored.distance) ?? getWidgetValue(node, "zoom", 5)
   };
+}
+function readCameraViewFromNode(node) {
+  var _a;
+  const stored = readStoredProps(node);
+  if ((stored == null ? void 0 : stored.cameraView) !== void 0) return Boolean(stored.cameraView);
+  const w = (_a = node.widgets) == null ? void 0 : _a.find((w2) => w2.name === "camera_view");
+  return Boolean(w == null ? void 0 : w.value);
+}
+function syncWidgetsFromState(node, state) {
+  var _a, _b, _c, _d;
+  const h = (_a = node.widgets) == null ? void 0 : _a.find((w) => w.name === "horizontal_angle");
+  const v = (_b = node.widgets) == null ? void 0 : _b.find((w) => w.name === "vertical_angle");
+  const z = (_c = node.widgets) == null ? void 0 : _c.find((w) => w.name === "zoom");
+  const cv = (_d = node.widgets) == null ? void 0 : _d.find((w) => w.name === "camera_view");
+  if (state.azimuth !== void 0 && h) h.value = state.azimuth;
+  if (state.elevation !== void 0 && v) v.value = state.elevation;
+  if (state.distance !== void 0 && z) z.value = state.distance;
+  if (state.cameraView !== void 0 && cv) cv.value = state.cameraView;
 }
 function createInstance(node) {
   const container = document.createElement("div");
@@ -27404,15 +27435,19 @@ function createInstance(node) {
   const vueApp = createApp(App, {
     initialState: readStateFromNode(node),
     onStateChange: (state) => {
-      var _a, _b, _c, _d;
+      var _a;
       const live = instance.currentNode;
-      const h = (_a = live.widgets) == null ? void 0 : _a.find((w) => w.name === "horizontal_angle");
-      const v = (_b = live.widgets) == null ? void 0 : _b.find((w) => w.name === "vertical_angle");
-      const z = (_c = live.widgets) == null ? void 0 : _c.find((w) => w.name === "zoom");
-      if (h) h.value = state.azimuth;
-      if (v) v.value = state.elevation;
-      if (z) z.value = state.distance;
-      (_d = app.graph) == null ? void 0 : _d.setDirtyCanvas(true, true);
+      syncWidgetsFromState(live, {
+        azimuth: state.azimuth,
+        elevation: state.elevation,
+        distance: state.distance
+      });
+      writeStoredProps(live, {
+        azimuth: state.azimuth,
+        elevation: state.elevation,
+        distance: state.distance
+      });
+      (_a = app.graph) == null ? void 0 : _a.setDirtyCanvas(true, true);
     }
   });
   const mounted = vueApp.mount(container);
@@ -27432,13 +27467,29 @@ function bindWidgetCallbacks(node, exposed) {
       apply2(value);
     };
   };
-  wire("horizontal_angle", (v) => exposed.setState({ azimuth: Number(v) }));
-  wire("vertical_angle", (v) => exposed.setState({ elevation: Number(v) }));
-  wire("zoom", (v) => exposed.setState({ distance: Number(v) }));
-  wire("camera_view", (v) => exposed.setCameraView(Boolean(v)));
+  wire("horizontal_angle", (v) => {
+    const azimuth = Number(v);
+    exposed.setState({ azimuth });
+    writeStoredProps(node, { azimuth });
+  });
+  wire("vertical_angle", (v) => {
+    const elevation = Number(v);
+    exposed.setState({ elevation });
+    writeStoredProps(node, { elevation });
+  });
+  wire("zoom", (v) => {
+    const distance = Number(v);
+    exposed.setState({ distance });
+    writeStoredProps(node, { distance });
+  });
+  wire("camera_view", (v) => {
+    const cameraView = Boolean(v);
+    exposed.setCameraView(cameraView);
+    writeStoredProps(node, { cameraView });
+  });
 }
 function createCameraWidget(node) {
-  var _a, _b, _c;
+  var _a;
   let instance = instances.get(node.id);
   if (instance) {
     if (instance.cleanupTimer !== null) {
@@ -27447,12 +27498,10 @@ function createCameraWidget(node) {
     }
     instance.currentNode = node;
     instance.exposed.setState(readStateFromNode(node));
-    const cv = (_a = node.widgets) == null ? void 0 : _a.find((w) => w.name === "camera_view");
-    instance.exposed.setCameraView(Boolean(cv == null ? void 0 : cv.value));
+    instance.exposed.setCameraView(readCameraViewFromNode(node));
   } else {
     instance = createInstance(node);
-    const cv = (_b = node.widgets) == null ? void 0 : _b.find((w) => w.name === "camera_view");
-    if (cv && Boolean(cv.value)) {
+    if (readCameraViewFromNode(node)) {
       instance.exposed.setCameraView(true);
     }
   }
@@ -27468,7 +27517,7 @@ function createCameraWidget(node) {
   );
   instance.widget = widget;
   bindWidgetCallbacks(node, instance.exposed);
-  const baseOnRemove = (_c = widget.onRemove) == null ? void 0 : _c.bind(widget);
+  const baseOnRemove = (_a = widget.onRemove) == null ? void 0 : _a.bind(widget);
   widget.onRemove = () => {
     baseOnRemove == null ? void 0 : baseOnRemove();
     const current = instances.get(node.id);
@@ -27517,6 +27566,24 @@ function setupOnExecuted(node, instance) {
     applyPreviewImageFromOutput(instance, output);
   };
 }
+function setupOnPropertyChanged(node, instance) {
+  const originalOnPropertyChanged = node.onPropertyChanged;
+  node.onPropertyChanged = function(key, value) {
+    originalOnPropertyChanged == null ? void 0 : originalOnPropertyChanged.call(this, key, value);
+    if (key !== PROP_KEY) return;
+    if (!value || typeof value !== "object") return;
+    const state = value;
+    instance.exposed.setState({
+      azimuth: state.azimuth,
+      elevation: state.elevation,
+      distance: state.distance
+    });
+    if (state.cameraView !== void 0) {
+      instance.exposed.setCameraView(Boolean(state.cameraView));
+    }
+    syncWidgetsFromState(node, state);
+  };
+}
 app.registerExtension({
   name: "ComfyUI.QwenMultiangle",
   nodeCreated(node) {
@@ -27529,7 +27596,10 @@ app.registerExtension({
     createCameraWidget(node);
     setupImageInput(node);
     const inst = instances.get(node.id);
-    if (inst) setupOnExecuted(node, inst);
+    if (inst) {
+      setupOnExecuted(node, inst);
+      setupOnPropertyChanged(node, inst);
+    }
   }
 });
 //# sourceMappingURL=main.js.map

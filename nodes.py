@@ -5,6 +5,7 @@ A 3D camera control node that outputs angle prompts
 
 from __future__ import annotations
 
+import math
 import os
 
 import numpy as np
@@ -15,6 +16,27 @@ from comfy_api.latest import ComfyExtension, io, UI
 from comfy_api.latest._io import _UIOutput, FolderType
 from comfy_api.latest._ui import ImageSaveHelper, SavedResult
 from typing_extensions import override
+
+
+# Must match CameraWidget.ts — keep in sync so camera_info describes the preview camera.
+_SCENE_CENTER_Y = 0.5
+
+
+def _build_camera_info(horizontal_angle: int, vertical_angle: int, zoom: float) -> dict:
+    az_rad = math.radians(horizontal_angle)
+    el_rad = math.radians(vertical_angle)
+    visual_dist = 2.6 - (zoom / 10.0) * 2.0
+
+    cam_x = visual_dist * math.sin(az_rad) * math.cos(el_rad)
+    cam_y = _SCENE_CENTER_Y + visual_dist * math.sin(el_rad)
+    cam_z = visual_dist * math.cos(az_rad) * math.cos(el_rad)
+
+    return {
+        "position": {"x": cam_x, "y": cam_y, "z": cam_z},
+        "target": {"x": 0.0, "y": _SCENE_CENTER_Y, "z": 0.0},
+        "zoom": 1,
+        "cameraType": "perspective",
+    }
 
 
 class _WidgetPreviewImages(_UIOutput):
@@ -82,6 +104,7 @@ class QwenMultiangleCameraNode(io.ComfyNode):
             ],
             outputs=[
                 io.String.Output("prompt", display_name="Prompt"),
+                io.Load3DCamera.Output("camera_info", display_name="Camera Info"),
             ],
             hidden=[io.Hidden.unique_id],
         )
@@ -153,7 +176,9 @@ class QwenMultiangleCameraNode(io.ComfyNode):
             except Exception as e:
                 print(f"[QwenMultiangle] Error saving preview image: {e}")
 
-        return io.NodeOutput(prompt, ui=_WidgetPreviewImages(ui_results))
+        camera_info = _build_camera_info(horizontal_angle, vertical_angle, zoom)
+
+        return io.NodeOutput(prompt, camera_info, ui=_WidgetPreviewImages(ui_results))
 
     @classmethod
     def fingerprint_inputs(
