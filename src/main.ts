@@ -24,14 +24,13 @@ interface QwenInstance {
   cleanupTimer: number | null
 }
 
-// Keyed by node.id so undo/redo can re-attach to the existing Vue app/
-// container: when a node is removed then restored, its object reference
-// changes but node.id is preserved. Hooks that run AFTER node.id has
-// stabilised (widget callbacks, onRemove, onConnectionsChange) can look up
-// by id. Hooks that may run while id is still mutating (e.g. during
-// configure()) must capture the instance by closure instead — see
-// setupOnPropertyChanged.
-const instances = new Map<number, QwenInstance>()
+// Keyed by the node object itself. node.id cannot be used: ComfyUI fires
+// nodeCreated from inside the LGraphNode constructor, BEFORE graph.add()
+// assigns a real id, so every freshly-created node arrives here with the
+// LiteGraph default id (-1). A Map keyed on -1 would let the second new
+// node hit the first node's entry and steal its container DOM via
+// addDOMWidget, wiping the first node's three.js view.
+const instances = new WeakMap<QwenMultiangleNode, QwenInstance>()
 
 const CLEANUP_DELAY_MS = 200
 
@@ -136,7 +135,7 @@ function createInstance(node: QwenMultiangleNode): QwenInstance {
   instance.vueApp = vueApp
   instance.exposed = mounted as unknown as AppExposed
 
-  instances.set(node.id, instance)
+  instances.set(node, instance)
   return instance
 }
 
@@ -177,7 +176,7 @@ function bindWidgetCallbacks(
 }
 
 function createCameraWidget(node: QwenMultiangleNode): DOMWidgetInstance {
-  let instance = instances.get(node.id)
+  let instance = instances.get(node)
 
   if (instance) {
     if (instance.cleanupTimer !== null) {
@@ -212,15 +211,15 @@ function createCameraWidget(node: QwenMultiangleNode): DOMWidgetInstance {
   widget.onRemove = () => {
     baseOnRemove?.()
 
-    const current = instances.get(node.id)
+    const current = instances.get(node)
     if (!current || current.widget !== widget) return
 
     current.cleanupTimer = window.setTimeout(() => {
-      const still = instances.get(node.id)
+      const still = instances.get(node)
       if (!still || still.widget !== widget) return
       still.exposed.cleanup()
       still.vueApp.unmount()
-      instances.delete(node.id)
+      instances.delete(node)
     }, CLEANUP_DELAY_MS)
   }
 
@@ -242,7 +241,7 @@ function setupImageInput(node: QwenMultiangleNode): void {
     }
 
     if (slotType === 1 && slotIndex === 0) {
-      const inst = instances.get(node.id)
+      const inst = instances.get(node)
       if (inst && !isConnected) {
         inst.exposed.updateImage(null)
       }
@@ -321,7 +320,7 @@ app.registerExtension({
 
     createCameraWidget(node)
     setupImageInput(node)
-    const inst = instances.get(node.id)
+    const inst = instances.get(node)
     if (inst) {
       setupOnExecuted(node, inst)
       setupOnPropertyChanged(node, inst)

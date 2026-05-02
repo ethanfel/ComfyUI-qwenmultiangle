@@ -27376,7 +27376,7 @@ const { api } = window.comfyAPI.api;
   link.href = cssUrl;
   document.head.appendChild(link);
 })();
-const instances = /* @__PURE__ */ new Map();
+const instances = /* @__PURE__ */ new WeakMap();
 const CLEANUP_DELAY_MS = 200;
 const PROP_KEY = "qwenCameraState";
 function getWidgetValue(node, name, defaultValue) {
@@ -27453,7 +27453,7 @@ function createInstance(node) {
   const mounted = vueApp.mount(container);
   instance.vueApp = vueApp;
   instance.exposed = mounted;
-  instances.set(node.id, instance);
+  instances.set(node, instance);
   return instance;
 }
 function bindWidgetCallbacks(node, exposed) {
@@ -27490,7 +27490,7 @@ function bindWidgetCallbacks(node, exposed) {
 }
 function createCameraWidget(node) {
   var _a;
-  let instance = instances.get(node.id);
+  let instance = instances.get(node);
   if (instance) {
     if (instance.cleanupTimer !== null) {
       clearTimeout(instance.cleanupTimer);
@@ -27520,14 +27520,14 @@ function createCameraWidget(node) {
   const baseOnRemove = (_a = widget.onRemove) == null ? void 0 : _a.bind(widget);
   widget.onRemove = () => {
     baseOnRemove == null ? void 0 : baseOnRemove();
-    const current = instances.get(node.id);
+    const current = instances.get(node);
     if (!current || current.widget !== widget) return;
     current.cleanupTimer = window.setTimeout(() => {
-      const still = instances.get(node.id);
+      const still = instances.get(node);
       if (!still || still.widget !== widget) return;
       still.exposed.cleanup();
       still.vueApp.unmount();
-      instances.delete(node.id);
+      instances.delete(node);
     }, CLEANUP_DELAY_MS);
   };
   return widget;
@@ -27539,7 +27539,7 @@ function setupImageInput(node) {
       originalOnConnectionsChange.call(this, slotType, slotIndex, isConnected, link, ioSlot);
     }
     if (slotType === 1 && slotIndex === 0) {
-      const inst = instances.get(node.id);
+      const inst = instances.get(node);
       if (inst && !isConnected) {
         inst.exposed.updateImage(null);
       }
@@ -27595,7 +27595,7 @@ app.registerExtension({
     node.setSize([Math.max(oldWidth, 350), Math.max(oldHeight, 520)]);
     createCameraWidget(node);
     setupImageInput(node);
-    const inst = instances.get(node.id);
+    const inst = instances.get(node);
     if (inst) {
       setupOnExecuted(node, inst);
       setupOnPropertyChanged(node, inst);
