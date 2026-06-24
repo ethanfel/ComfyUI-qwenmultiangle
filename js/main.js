@@ -27449,10 +27449,25 @@ function referenceWidthFromDom(container) {
   }
   return w;
 }
-function referenceWidth(node, container) {
+const MAX_WIDGET_MARGIN = 40;
+function referenceFromNodeSize(instance, cw) {
+  var _a;
+  const nodeW = ((_a = instance.currentNode.size) == null ? void 0 : _a[0]) ?? 0;
+  if (nodeW <= 0) return 0;
+  if (cw > 0) {
+    const m = nodeW - cw;
+    if (m >= 0 && m < instance.marginLogical) {
+      instance.marginLogical = Math.min(m, MAX_WIDGET_MARGIN);
+    }
+  }
+  const margin = Number.isFinite(instance.marginLogical) ? instance.marginLogical : MAX_WIDGET_MARGIN / 2;
+  return Math.round(nodeW - margin);
+}
+function referenceWidth(instance, container, cw) {
   let w = referenceWidthFromDom(container);
+  if (!w) w = referenceFromNodeSize(instance, cw);
   if (!w) {
-    for (const widget of node.widgets ?? []) {
+    for (const widget of instance.currentNode.widgets ?? []) {
       const el = widget.inputEl || widget.element;
       if (el && el !== container && el.offsetWidth > w) w = el.offsetWidth;
     }
@@ -27471,42 +27486,16 @@ function enforceWidth(instance) {
       instance.gridObserver.observe(grid);
     }
   }
-  const ref2 = referenceWidth(instance.currentNode, container);
+  const cw = container.clientWidth;
+  const ref2 = referenceWidth(instance, container, cw);
   if (WIDGET_DEBUG) {
-    const fmt = (el2) => {
-      var _a2;
-      if (!el2) return "null";
-      const cls = (el2.className || "").toString().trim().replace(/\s+/g, ".").slice(0, 50);
-      return `${el2.tagName.toLowerCase()}${((_a2 = el2.dataset) == null ? void 0 : _a2.testid) ? `[${el2.dataset.testid}]` : ""}.${cls}:cw=${el2.clientWidth},ow=${el2.offsetWidth}`;
-    };
-    const chain = [];
-    let el = container;
-    for (let i = 0; i < 9 && el; i++) {
-      chain.push(fmt(el));
-      el = el.parentElement;
-    }
-    const grid = findWidgetsGrid(container);
-    const rows = grid ? Array.from(grid.querySelectorAll(WIDGET_ROW_SEL)) : [];
-    const rowInfo = rows.map(
-      (r, i) => {
-        var _a2;
-        return `#${i}${r.contains(container) ? "(self)" : ""}=${((_a2 = r.lastElementChild) == null ? void 0 : _a2.clientWidth) ?? "?"}`;
-      }
-    ).join(" ");
+    const nodeW = (_a = instance.currentNode.size) == null ? void 0 : _a[0];
     console.log(
       "[QwenMultiangle][width]",
-      `
-  container=${container.clientWidth} ref=${ref2}`,
-      `
-  gridFound=${!!grid} gridCW=${(grid == null ? void 0 : grid.clientWidth) ?? "-"} rows=[${rowInfo}]`,
-      `
-  fromDom=${referenceWidthFromDom(container)} parentCW=${((_a = container.parentElement) == null ? void 0 : _a.clientWidth) ?? "-"}`,
-      `
-  chain:
-    ${chain.join("\n    ")}`
+      `container=${cw} ref=${ref2} nodeW=${nodeW} margin=${instance.marginLogical} fromDom=${referenceWidthFromDom(container)}`
     );
   }
-  if (ref2 > 0 && Math.abs(container.clientWidth - ref2) > 2) {
+  if (ref2 > 0 && Math.abs(cw - ref2) > 2) {
     instance.enforcingWidth = true;
     container.style.width = ref2 + "px";
     requestAnimationFrame(() => {
@@ -27528,6 +27517,7 @@ function createInstance(node) {
   instance.widthObserver = null;
   instance.gridObserver = null;
   instance.enforcingWidth = false;
+  instance.marginLogical = Infinity;
   const vueApp = createApp(App, {
     initialState: readStateFromNode(node),
     onStateChange: (state) => {

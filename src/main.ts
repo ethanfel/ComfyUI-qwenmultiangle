@@ -25,6 +25,9 @@ interface QwenInstance {
   widthObserver: ResizeObserver | null
   gridObserver: ResizeObserver | null
   enforcingWidth: boolean
+  // Smallest (node.size[0] - container width) ever seen, i.e. the widget's true
+  // horizontal margin in node-logical px, learned from uncollapsed samples.
+  marginLogical: number
 }
 
 // Keyed by the node object itself. node.id cannot be used: ComfyUI fires
@@ -148,17 +151,48 @@ function referenceWidthFromDom(container: HTMLElement): number {
   return w
 }
 
-function referenceWidth(node: QwenMultiangleNode, container: HTMLElement): number {
+// Classic canvas renderer: there is no Vue widgets grid, and the sibling number/
+// boolean widgets are canvas-drawn (no DOM element), so nothing measurable stays
+// full width when ComfyUI collapses our DOM widget on selection. Derive the
+// target from the node's own width instead — node.size[0] does NOT change on
+// selection. The DOM widget element is sized in node-logical px (the canvas
+// applies zoom via a CSS transform, so clientWidth stays logical and matches
+// node.size[0]'s units). Self-calibrate the small widget margin from the widest
+// (uncollapsed) sample seen; cap it so a node that loads already-collapsed still
+// recovers to near-full.
+const MAX_WIDGET_MARGIN = 40
+function referenceFromNodeSize(instance: QwenInstance, cw: number): number {
+  const nodeW = instance.currentNode.size?.[0] ?? 0
+  if (nodeW <= 0) return 0
+  if (cw > 0) {
+    const m = nodeW - cw
+    if (m >= 0 && m < instance.marginLogical) {
+      instance.marginLogical = Math.min(m, MAX_WIDGET_MARGIN)
+    }
+  }
+  const margin = Number.isFinite(instance.marginLogical)
+    ? instance.marginLogical
+    : MAX_WIDGET_MARGIN / 2
+  return Math.round(nodeW - margin)
+}
+
+function referenceWidth(
+  instance: QwenInstance,
+  container: HTMLElement,
+  cw: number
+): number {
   // 1) vueNodes: measure a real sibling widget control in the DOM.
   let w = referenceWidthFromDom(container)
-  // 2) classic canvas frontend: litegraph widgets that own a DOM element.
+  // 2) classic canvas renderer: derive from the node's own (stable) width.
+  if (!w) w = referenceFromNodeSize(instance, cw)
+  // 3) litegraph widgets that own a DOM element (e.g. textareas).
   if (!w) {
-    for (const widget of node.widgets ?? []) {
+    for (const widget of instance.currentNode.widgets ?? []) {
       const el = widget.inputEl || widget.element
       if (el && el !== container && el.offsetWidth > w) w = el.offsetWidth
     }
   }
-  // 3) last resort: the immediate parent's width.
+  // 4) last resort: the immediate parent's width.
   if (!w && container.parentElement) w = container.parentElement.clientWidth
   return w
 }
@@ -181,32 +215,17 @@ function enforceWidth(instance: QwenInstance): void {
     }
   }
 
-  const ref = referenceWidth(instance.currentNode, container)
+  const cw = container.clientWidth
+  const ref = referenceWidth(instance, container, cw)
   if (WIDGET_DEBUG) {
-    const fmt = (el: HTMLElement | null) => {
-      if (!el) return 'null'
-      const cls = (el.className || '').toString().trim().replace(/\s+/g, '.').slice(0, 50)
-      return `${el.tagName.toLowerCase()}${el.dataset?.testid ? `[${el.dataset.testid}]` : ''}.${cls}:cw=${el.clientWidth},ow=${el.offsetWidth}`
-    }
-    const chain: string[] = []
-    let el: HTMLElement | null = container
-    for (let i = 0; i < 9 && el; i++) { chain.push(fmt(el)); el = el.parentElement }
-    const grid = findWidgetsGrid(container)
-    const rows = grid ? Array.from(grid.querySelectorAll(WIDGET_ROW_SEL)) : []
-    const rowInfo = rows.map((r, i) =>
-      `#${i}${r.contains(container) ? '(self)' : ''}=${(r.lastElementChild as HTMLElement | null)?.clientWidth ?? '?'}`
-    ).join(' ')
+    const nodeW = instance.currentNode.size?.[0]
     console.log('[QwenMultiangle][width]',
-      `\n  container=${container.clientWidth} ref=${ref}`,
-      `\n  gridFound=${!!grid} gridCW=${grid?.clientWidth ?? '-'} rows=[${rowInfo}]`,
-      `\n  fromDom=${referenceWidthFromDom(container)} parentCW=${container.parentElement?.clientWidth ?? '-'}`,
-      `\n  chain:\n    ${chain.join('\n    ')}`)
+      `container=${cw} ref=${ref} nodeW=${nodeW} margin=${instance.marginLogical} fromDom=${referenceWidthFromDom(container)}`)
   }
-  // Two-directional: the DOM reference tracks the sibling widgets, so match it
-  // whether our container collapsed (too narrow) or the node was shrunk (too
-  // wide). FoleyTune only grows because its parent reference is unreliable; our
-  // sibling measurement is exact, so we can also follow shrinks.
-  if (ref > 0 && Math.abs(container.clientWidth - ref) > 2) {
+  // Two-directional: node.size[0] tracks legitimate resizes, so match the
+  // reference whether our container collapsed (too narrow) or the node was
+  // shrunk (too wide).
+  if (ref > 0 && Math.abs(cw - ref) > 2) {
     instance.enforcingWidth = true
     container.style.width = ref + 'px'
     requestAnimationFrame(() => { instance.enforcingWidth = false })
@@ -228,6 +247,7 @@ function createInstance(node: QwenMultiangleNode): QwenInstance {
   instance.widthObserver = null
   instance.gridObserver = null
   instance.enforcingWidth = false
+  instance.marginLogical = Infinity
 
   const vueApp = createApp(App, {
     initialState: readStateFromNode(node),
