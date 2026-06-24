@@ -27421,6 +27421,27 @@ function syncWidgetsFromState(node, state) {
   if (state.distance !== void 0 && z) z.value = state.distance;
   if (state.cameraView !== void 0 && cv) cv.value = state.cameraView;
 }
+function referenceWidth(node, container) {
+  let w = 0;
+  for (const widget of node.widgets ?? []) {
+    const el = widget.inputEl || widget.element;
+    if (el && el !== container && el.offsetWidth > w) w = el.offsetWidth;
+  }
+  if (!w && container.parentElement) w = container.parentElement.clientWidth;
+  return w;
+}
+function enforceWidth(instance) {
+  if (instance.enforcingWidth) return;
+  const container = instance.container;
+  const ref2 = referenceWidth(instance.currentNode, container);
+  if (ref2 > 0 && container.clientWidth < ref2 - 2) {
+    instance.enforcingWidth = true;
+    container.style.width = ref2 + "px";
+    requestAnimationFrame(() => {
+      instance.enforcingWidth = false;
+    });
+  }
+}
 function createInstance(node) {
   const container = document.createElement("div");
   container.id = `qwen-multiangle-widget-${node.id}`;
@@ -27432,6 +27453,8 @@ function createInstance(node) {
   instance.currentNode = node;
   instance.widget = null;
   instance.cleanupTimer = null;
+  instance.widthObserver = null;
+  instance.enforcingWidth = false;
   const vueApp = createApp(App, {
     initialState: readStateFromNode(node),
     onStateChange: (state) => {
@@ -27453,6 +27476,8 @@ function createInstance(node) {
   const mounted = vueApp.mount(container);
   instance.vueApp = vueApp;
   instance.exposed = mounted;
+  instance.widthObserver = new ResizeObserver(() => enforceWidth(instance));
+  instance.widthObserver.observe(container);
   instances.set(node, instance);
   return instance;
 }
@@ -27523,8 +27548,11 @@ function createCameraWidget(node) {
     const current = instances.get(node);
     if (!current || current.widget !== widget) return;
     current.cleanupTimer = window.setTimeout(() => {
+      var _a2;
       const still = instances.get(node);
       if (!still || still.widget !== widget) return;
+      (_a2 = still.widthObserver) == null ? void 0 : _a2.disconnect();
+      still.widthObserver = null;
       still.exposed.cleanup();
       still.vueApp.unmount();
       instances.delete(node);
@@ -27559,11 +27587,34 @@ function applyPreviewImageFromOutput(instance, output) {
   const url = api.apiURL(`/view?${params.toString()}`);
   instance.exposed.updateImage(url);
 }
+function applyCameraStateFromOutput(node, instance, output) {
+  var _a;
+  if (!output || typeof output !== "object") return;
+  const raw = output.camera_state;
+  if (!raw || typeof raw !== "object") return;
+  const patch = {};
+  if (typeof raw.azimuth === "number") patch.azimuth = raw.azimuth;
+  if (typeof raw.elevation === "number") patch.elevation = raw.elevation;
+  if (typeof raw.distance === "number") patch.distance = raw.distance;
+  if (Object.keys(patch).length === 0) return;
+  instance.exposed.setState(patch);
+  syncWidgetsFromState(node, patch);
+  writeStoredProps(node, patch);
+  (_a = app.graph) == null ? void 0 : _a.setDirtyCanvas(true, true);
+}
 function setupOnExecuted(node, instance) {
   const originalOnExecuted = node.onExecuted;
   node.onExecuted = function(output) {
     originalOnExecuted == null ? void 0 : originalOnExecuted.call(this, output);
     applyPreviewImageFromOutput(instance, output);
+    applyCameraStateFromOutput(node, instance, output);
+  };
+}
+function setupOnResize(node, instance) {
+  const originalOnResize = node.onResize;
+  node.onResize = function(size) {
+    originalOnResize == null ? void 0 : originalOnResize.call(this, size);
+    enforceWidth(instance);
   };
 }
 function setupOnPropertyChanged(node, instance) {
@@ -27599,6 +27650,7 @@ app.registerExtension({
     if (inst) {
       setupOnExecuted(node, inst);
       setupOnPropertyChanged(node, inst);
+      setupOnResize(node, inst);
     }
   }
 });

@@ -22,6 +22,8 @@ interface QwenInstance {
   currentNode: QwenMultiangleNode
   widget: DOMWidgetInstance | null
   cleanupTimer: number | null
+  widthObserver: ResizeObserver | null
+  enforcingWidth: boolean
 }
 
 // Keyed by the node object itself. node.id cannot be used: ComfyUI fires
@@ -101,6 +103,35 @@ function syncWidgetsFromState(
   if (state.cameraView !== undefined && cv) cv.value = state.cameraView
 }
 
+// A ComfyUI-wide bug collapses DOM-widget elements to ~half width when the node
+// is selected or re-laid-out (VHS Load Video and the FoleyTune timeline show it
+// too): the standard widgets stay full width, but our addDOMWidget container
+// shrinks, squashing the three.js view into the left half of the node. Same hack
+// the FoleyTune timeline uses: if our container is narrower than a sibling widget
+// that stayed full width (or the node's content area), force it back.
+function referenceWidth(node: QwenMultiangleNode, container: HTMLElement): number {
+  let w = 0
+  for (const widget of node.widgets ?? []) {
+    const el = widget.inputEl || widget.element
+    if (el && el !== container && el.offsetWidth > w) w = el.offsetWidth
+  }
+  if (!w && container.parentElement) w = container.parentElement.clientWidth
+  return w
+}
+
+// The enforcingWidth flag breaks the ResizeObserver feedback loop: setting the
+// width re-fires the observer, which would otherwise re-enter here immediately.
+function enforceWidth(instance: QwenInstance): void {
+  if (instance.enforcingWidth) return
+  const container = instance.container
+  const ref = referenceWidth(instance.currentNode, container)
+  if (ref > 0 && container.clientWidth < ref - 2) {
+    instance.enforcingWidth = true
+    container.style.width = ref + 'px'
+    requestAnimationFrame(() => { instance.enforcingWidth = false })
+  }
+}
+
 function createInstance(node: QwenMultiangleNode): QwenInstance {
   const container = document.createElement('div')
   container.id = `qwen-multiangle-widget-${node.id}`
@@ -113,6 +144,8 @@ function createInstance(node: QwenMultiangleNode): QwenInstance {
   instance.currentNode = node
   instance.widget = null
   instance.cleanupTimer = null
+  instance.widthObserver = null
+  instance.enforcingWidth = false
 
   const vueApp = createApp(App, {
     initialState: readStateFromNode(node),
@@ -134,6 +167,10 @@ function createInstance(node: QwenMultiangleNode): QwenInstance {
   const mounted = vueApp.mount(container)
   instance.vueApp = vueApp
   instance.exposed = mounted as unknown as AppExposed
+
+  // Guard against the DOM-widget width-collapse bug (see enforceWidth above).
+  instance.widthObserver = new ResizeObserver(() => enforceWidth(instance))
+  instance.widthObserver.observe(container)
 
   instances.set(node, instance)
   return instance
@@ -217,6 +254,8 @@ function createCameraWidget(node: QwenMultiangleNode): DOMWidgetInstance {
     current.cleanupTimer = window.setTimeout(() => {
       const still = instances.get(node)
       if (!still || still.widget !== widget) return
+      still.widthObserver?.disconnect()
+      still.widthObserver = null
       still.exposed.cleanup()
       still.vueApp.unmount()
       instances.delete(node)
@@ -268,11 +307,46 @@ function applyPreviewImageFromOutput(
   instance.exposed.updateImage(url)
 }
 
+// When the node randomizes the camera angle server-side, execute() pushes the
+// chosen angles back here so the 3D preview and the number widgets reflect them.
+function applyCameraStateFromOutput(
+  node: QwenMultiangleNode,
+  instance: QwenInstance,
+  output: unknown
+): void {
+  if (!output || typeof output !== 'object') return
+  const raw = (output as { camera_state?: Record<string, unknown> }).camera_state
+  if (!raw || typeof raw !== 'object') return
+
+  const patch: Partial<StoredCameraState> = {}
+  if (typeof raw.azimuth === 'number') patch.azimuth = raw.azimuth
+  if (typeof raw.elevation === 'number') patch.elevation = raw.elevation
+  if (typeof raw.distance === 'number') patch.distance = raw.distance
+  if (Object.keys(patch).length === 0) return
+
+  instance.exposed.setState(patch)
+  syncWidgetsFromState(node, patch)
+  writeStoredProps(node, patch)
+  app.graph?.setDirtyCanvas(true, true)
+}
+
 function setupOnExecuted(node: QwenMultiangleNode, instance: QwenInstance): void {
   const originalOnExecuted = node.onExecuted
   node.onExecuted = function(output: unknown) {
     originalOnExecuted?.call(this, output)
     applyPreviewImageFromOutput(instance, output)
+    applyCameraStateFromOutput(node, instance, output)
+  }
+}
+
+// Re-assert the container width whenever the node is resized. The ResizeObserver
+// catches the collapse bug on its own, but an explicit pixel width set by an
+// earlier enforce would otherwise stay stale when the node is genuinely widened.
+function setupOnResize(node: QwenMultiangleNode, instance: QwenInstance): void {
+  const originalOnResize = node.onResize
+  node.onResize = function(size: [number, number]) {
+    originalOnResize?.call(this, size)
+    enforceWidth(instance)
   }
 }
 
@@ -324,6 +398,7 @@ app.registerExtension({
     if (inst) {
       setupOnExecuted(node, inst)
       setupOnPropertyChanged(node, inst)
+      setupOnResize(node, inst)
     }
   }
 })

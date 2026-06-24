@@ -10,6 +10,9 @@ interface ComfyWidget {
   name: string
   value: unknown
   callback?: (value: unknown) => void
+  // DOM-backed widgets expose their element under one of these (varies by type).
+  inputEl?: HTMLElement
+  element?: HTMLElement
 }
 
 interface ComfyNode {
@@ -38,6 +41,7 @@ interface ComfyNode {
   ) => void
   onExecuted?: (output: unknown) => void
   onPropertyChanged?: (key: string, value: unknown) => void
+  onResize?: (size: [number, number]) => void
 }
 
 interface DOMWidgetInstance {
