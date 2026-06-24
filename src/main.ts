@@ -23,6 +23,7 @@ interface QwenInstance {
   widget: DOMWidgetInstance | null
   cleanupTimer: number | null
   widthObserver: ResizeObserver | null
+  gridObserver: ResizeObserver | null
   enforcingWidth: boolean
 }
 
@@ -104,17 +105,60 @@ function syncWidgetsFromState(
 }
 
 // A ComfyUI-wide bug collapses DOM-widget elements to ~half width when the node
-// is selected or re-laid-out (VHS Load Video and the FoleyTune timeline show it
-// too): the standard widgets stay full width, but our addDOMWidget container
-// shrinks, squashing the three.js view into the left half of the node. Same hack
-// the FoleyTune timeline uses: if our container is narrower than a sibling widget
-// that stayed full width (or the node's content area), force it back.
-function referenceWidth(node: QwenMultiangleNode, container: HTMLElement): number {
+// is selected or re-laid-out: the standard widgets stay full width, but our
+// addDOMWidget container shrinks, squashing the three.js view into the left half
+// of the node. Same idea as the FoleyTune timeline hack — measure how wide a
+// sibling widget that stayed full width is, then force our container back to it.
+//
+// FoleyTune reads widget.inputEl/element off the litegraph widgets, which works
+// in the classic canvas frontend (its textarea widgets own a DOM element). The
+// new Vue node frontend (vueNodes) does NOT expose widget.element for plain
+// number/boolean widgets, so that path finds nothing and falls through to the
+// already-collapsed parent — which is why the straight port did nothing here.
+// So in vueNodes we measure the rendered DOM directly: every widget row lives in
+// [data-testid="node-widgets"] and its control element is the row's last child,
+// laid out in the same grid columns our widget should fill.
+const WIDGET_DEBUG = (() => {
+  try { return localStorage.getItem('qwenWidgetDebug') === '1' } catch { return false }
+})()
+
+const WIDGETS_GRID_SEL = '[data-testid="node-widgets"], .lg-node-widgets'
+const WIDGET_ROW_SEL = '[data-testid="node-widget"], .lg-node-widget'
+
+function findWidgetsGrid(container: HTMLElement): HTMLElement | null {
+  return container.closest(WIDGETS_GRID_SEL)
+}
+
+function referenceWidthFromDom(container: HTMLElement): number {
+  const grid = findWidgetsGrid(container)
+  if (!grid) return 0
   let w = 0
-  for (const widget of node.widgets ?? []) {
-    const el = widget.inputEl || widget.element
-    if (el && el !== container && el.offsetWidth > w) w = el.offsetWidth
+  for (const row of Array.from(grid.querySelectorAll(WIDGET_ROW_SEL))) {
+    if (row.contains(container)) continue
+    // The control spans the label+value columns; it is the row's last element.
+    const control = row.lastElementChild as HTMLElement | null
+    const cw = control?.clientWidth ?? 0
+    if (cw > w) w = cw
   }
+  // No measurable sibling row — fall back to the full grid minus the dot column.
+  if (!w && grid.clientWidth > 0) {
+    const dot = grid.querySelector(`${WIDGET_ROW_SEL.split(',')[0]} > :first-child`) as HTMLElement | null
+    w = grid.clientWidth - (dot?.offsetWidth ?? 0)
+  }
+  return w
+}
+
+function referenceWidth(node: QwenMultiangleNode, container: HTMLElement): number {
+  // 1) vueNodes: measure a real sibling widget control in the DOM.
+  let w = referenceWidthFromDom(container)
+  // 2) classic canvas frontend: litegraph widgets that own a DOM element.
+  if (!w) {
+    for (const widget of node.widgets ?? []) {
+      const el = widget.inputEl || widget.element
+      if (el && el !== container && el.offsetWidth > w) w = el.offsetWidth
+    }
+  }
+  // 3) last resort: the immediate parent's width.
   if (!w && container.parentElement) w = container.parentElement.clientWidth
   return w
 }
@@ -124,8 +168,34 @@ function referenceWidth(node: QwenMultiangleNode, container: HTMLElement): numbe
 function enforceWidth(instance: QwenInstance): void {
   if (instance.enforcingWidth) return
   const container = instance.container
+
+  // Once our container lives in the Vue widgets grid, observe that grid too:
+  // after we pin an explicit px width, the container's own box stops changing on
+  // later collapses, so its ResizeObserver goes quiet. The grid stays fluid and
+  // still ticks on every re-layout, keeping us in sync.
+  if (instance.gridObserver === null) {
+    const grid = findWidgetsGrid(container)
+    if (grid) {
+      instance.gridObserver = new ResizeObserver(() => enforceWidth(instance))
+      instance.gridObserver.observe(grid)
+    }
+  }
+
   const ref = referenceWidth(instance.currentNode, container)
-  if (ref > 0 && container.clientWidth < ref - 2) {
+  if (WIDGET_DEBUG) {
+    const chain: string[] = []
+    let el: HTMLElement | null = container
+    for (let i = 0; i < 6 && el; i++) {
+      chain.push(`${el.tagName.toLowerCase()}.${(el.className || '').toString().split(' ').filter(Boolean).join('.')}=${el.clientWidth}`)
+      el = el.parentElement
+    }
+    console.log('[QwenMultiangle][width]', { container: container.clientWidth, ref, chain })
+  }
+  // Two-directional: the DOM reference tracks the sibling widgets, so match it
+  // whether our container collapsed (too narrow) or the node was shrunk (too
+  // wide). FoleyTune only grows because its parent reference is unreliable; our
+  // sibling measurement is exact, so we can also follow shrinks.
+  if (ref > 0 && Math.abs(container.clientWidth - ref) > 2) {
     instance.enforcingWidth = true
     container.style.width = ref + 'px'
     requestAnimationFrame(() => { instance.enforcingWidth = false })
@@ -145,6 +215,7 @@ function createInstance(node: QwenMultiangleNode): QwenInstance {
   instance.widget = null
   instance.cleanupTimer = null
   instance.widthObserver = null
+  instance.gridObserver = null
   instance.enforcingWidth = false
 
   const vueApp = createApp(App, {
@@ -256,6 +327,8 @@ function createCameraWidget(node: QwenMultiangleNode): DOMWidgetInstance {
       if (!still || still.widget !== widget) return
       still.widthObserver?.disconnect()
       still.widthObserver = null
+      still.gridObserver?.disconnect()
+      still.gridObserver = null
       still.exposed.cleanup()
       still.vueApp.unmount()
       instances.delete(node)

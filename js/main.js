@@ -27421,11 +27421,41 @@ function syncWidgetsFromState(node, state) {
   if (state.distance !== void 0 && z) z.value = state.distance;
   if (state.cameraView !== void 0 && cv) cv.value = state.cameraView;
 }
-function referenceWidth(node, container) {
+const WIDGET_DEBUG = (() => {
+  try {
+    return localStorage.getItem("qwenWidgetDebug") === "1";
+  } catch {
+    return false;
+  }
+})();
+const WIDGETS_GRID_SEL = '[data-testid="node-widgets"], .lg-node-widgets';
+const WIDGET_ROW_SEL = '[data-testid="node-widget"], .lg-node-widget';
+function findWidgetsGrid(container) {
+  return container.closest(WIDGETS_GRID_SEL);
+}
+function referenceWidthFromDom(container) {
+  const grid = findWidgetsGrid(container);
+  if (!grid) return 0;
   let w = 0;
-  for (const widget of node.widgets ?? []) {
-    const el = widget.inputEl || widget.element;
-    if (el && el !== container && el.offsetWidth > w) w = el.offsetWidth;
+  for (const row of Array.from(grid.querySelectorAll(WIDGET_ROW_SEL))) {
+    if (row.contains(container)) continue;
+    const control = row.lastElementChild;
+    const cw = (control == null ? void 0 : control.clientWidth) ?? 0;
+    if (cw > w) w = cw;
+  }
+  if (!w && grid.clientWidth > 0) {
+    const dot = grid.querySelector(`${WIDGET_ROW_SEL.split(",")[0]} > :first-child`);
+    w = grid.clientWidth - ((dot == null ? void 0 : dot.offsetWidth) ?? 0);
+  }
+  return w;
+}
+function referenceWidth(node, container) {
+  let w = referenceWidthFromDom(container);
+  if (!w) {
+    for (const widget of node.widgets ?? []) {
+      const el = widget.inputEl || widget.element;
+      if (el && el !== container && el.offsetWidth > w) w = el.offsetWidth;
+    }
   }
   if (!w && container.parentElement) w = container.parentElement.clientWidth;
   return w;
@@ -27433,8 +27463,24 @@ function referenceWidth(node, container) {
 function enforceWidth(instance) {
   if (instance.enforcingWidth) return;
   const container = instance.container;
+  if (instance.gridObserver === null) {
+    const grid = findWidgetsGrid(container);
+    if (grid) {
+      instance.gridObserver = new ResizeObserver(() => enforceWidth(instance));
+      instance.gridObserver.observe(grid);
+    }
+  }
   const ref2 = referenceWidth(instance.currentNode, container);
-  if (ref2 > 0 && container.clientWidth < ref2 - 2) {
+  if (WIDGET_DEBUG) {
+    const chain = [];
+    let el = container;
+    for (let i = 0; i < 6 && el; i++) {
+      chain.push(`${el.tagName.toLowerCase()}.${(el.className || "").toString().split(" ").filter(Boolean).join(".")}=${el.clientWidth}`);
+      el = el.parentElement;
+    }
+    console.log("[QwenMultiangle][width]", { container: container.clientWidth, ref: ref2, chain });
+  }
+  if (ref2 > 0 && Math.abs(container.clientWidth - ref2) > 2) {
     instance.enforcingWidth = true;
     container.style.width = ref2 + "px";
     requestAnimationFrame(() => {
@@ -27454,6 +27500,7 @@ function createInstance(node) {
   instance.widget = null;
   instance.cleanupTimer = null;
   instance.widthObserver = null;
+  instance.gridObserver = null;
   instance.enforcingWidth = false;
   const vueApp = createApp(App, {
     initialState: readStateFromNode(node),
@@ -27548,11 +27595,13 @@ function createCameraWidget(node) {
     const current = instances.get(node);
     if (!current || current.widget !== widget) return;
     current.cleanupTimer = window.setTimeout(() => {
-      var _a2;
+      var _a2, _b;
       const still = instances.get(node);
       if (!still || still.widget !== widget) return;
       (_a2 = still.widthObserver) == null ? void 0 : _a2.disconnect();
       still.widthObserver = null;
+      (_b = still.gridObserver) == null ? void 0 : _b.disconnect();
+      still.gridObserver = null;
       still.exposed.cleanup();
       still.vueApp.unmount();
       instances.delete(node);
