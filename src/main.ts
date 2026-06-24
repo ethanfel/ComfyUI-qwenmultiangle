@@ -183,13 +183,24 @@ function enforceWidth(instance: QwenInstance): void {
 
   const ref = referenceWidth(instance.currentNode, container)
   if (WIDGET_DEBUG) {
+    const fmt = (el: HTMLElement | null) => {
+      if (!el) return 'null'
+      const cls = (el.className || '').toString().trim().replace(/\s+/g, '.').slice(0, 50)
+      return `${el.tagName.toLowerCase()}${el.dataset?.testid ? `[${el.dataset.testid}]` : ''}.${cls}:cw=${el.clientWidth},ow=${el.offsetWidth}`
+    }
     const chain: string[] = []
     let el: HTMLElement | null = container
-    for (let i = 0; i < 6 && el; i++) {
-      chain.push(`${el.tagName.toLowerCase()}.${(el.className || '').toString().split(' ').filter(Boolean).join('.')}=${el.clientWidth}`)
-      el = el.parentElement
-    }
-    console.log('[QwenMultiangle][width]', { container: container.clientWidth, ref, chain })
+    for (let i = 0; i < 9 && el; i++) { chain.push(fmt(el)); el = el.parentElement }
+    const grid = findWidgetsGrid(container)
+    const rows = grid ? Array.from(grid.querySelectorAll(WIDGET_ROW_SEL)) : []
+    const rowInfo = rows.map((r, i) =>
+      `#${i}${r.contains(container) ? '(self)' : ''}=${(r.lastElementChild as HTMLElement | null)?.clientWidth ?? '?'}`
+    ).join(' ')
+    console.log('[QwenMultiangle][width]',
+      `\n  container=${container.clientWidth} ref=${ref}`,
+      `\n  gridFound=${!!grid} gridCW=${grid?.clientWidth ?? '-'} rows=[${rowInfo}]`,
+      `\n  fromDom=${referenceWidthFromDom(container)} parentCW=${container.parentElement?.clientWidth ?? '-'}`,
+      `\n  chain:\n    ${chain.join('\n    ')}`)
   }
   // Two-directional: the DOM reference tracks the sibling widgets, so match it
   // whether our container collapsed (too narrow) or the node was shrunk (too

@@ -27461,6 +27461,7 @@ function referenceWidth(node, container) {
   return w;
 }
 function enforceWidth(instance) {
+  var _a;
   if (instance.enforcingWidth) return;
   const container = instance.container;
   if (instance.gridObserver === null) {
@@ -27472,13 +27473,38 @@ function enforceWidth(instance) {
   }
   const ref2 = referenceWidth(instance.currentNode, container);
   if (WIDGET_DEBUG) {
+    const fmt = (el2) => {
+      var _a2;
+      if (!el2) return "null";
+      const cls = (el2.className || "").toString().trim().replace(/\s+/g, ".").slice(0, 50);
+      return `${el2.tagName.toLowerCase()}${((_a2 = el2.dataset) == null ? void 0 : _a2.testid) ? `[${el2.dataset.testid}]` : ""}.${cls}:cw=${el2.clientWidth},ow=${el2.offsetWidth}`;
+    };
     const chain = [];
     let el = container;
-    for (let i = 0; i < 6 && el; i++) {
-      chain.push(`${el.tagName.toLowerCase()}.${(el.className || "").toString().split(" ").filter(Boolean).join(".")}=${el.clientWidth}`);
+    for (let i = 0; i < 9 && el; i++) {
+      chain.push(fmt(el));
       el = el.parentElement;
     }
-    console.log("[QwenMultiangle][width]", { container: container.clientWidth, ref: ref2, chain });
+    const grid = findWidgetsGrid(container);
+    const rows = grid ? Array.from(grid.querySelectorAll(WIDGET_ROW_SEL)) : [];
+    const rowInfo = rows.map(
+      (r, i) => {
+        var _a2;
+        return `#${i}${r.contains(container) ? "(self)" : ""}=${((_a2 = r.lastElementChild) == null ? void 0 : _a2.clientWidth) ?? "?"}`;
+      }
+    ).join(" ");
+    console.log(
+      "[QwenMultiangle][width]",
+      `
+  container=${container.clientWidth} ref=${ref2}`,
+      `
+  gridFound=${!!grid} gridCW=${(grid == null ? void 0 : grid.clientWidth) ?? "-"} rows=[${rowInfo}]`,
+      `
+  fromDom=${referenceWidthFromDom(container)} parentCW=${((_a = container.parentElement) == null ? void 0 : _a.clientWidth) ?? "-"}`,
+      `
+  chain:
+    ${chain.join("\n    ")}`
+    );
   }
   if (ref2 > 0 && Math.abs(container.clientWidth - ref2) > 2) {
     instance.enforcingWidth = true;
