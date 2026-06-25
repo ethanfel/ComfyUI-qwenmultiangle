@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import math
 import os
-import random
 
 import numpy as np
 from PIL import Image
@@ -21,6 +20,33 @@ from typing_extensions import override
 
 # Must match CameraWidget.ts — keep in sync so camera_info describes the preview camera.
 _SCENE_CENTER_Y = 0.5
+
+
+def _imul(a: int, b: int) -> int:
+    return (a * b) & 0xFFFFFFFF
+
+
+def _seeded_angles(seed: int) -> tuple[int, int, float]:
+    """Deterministic camera angles from a seed, via the mulberry32 PRNG.
+
+    MUST stay byte-for-byte identical to seededAngles() in src/seededAngles.ts so
+    the live 3D preview in the frontend matches the executed result exactly.
+    """
+    a = seed & 0xFFFFFFFF
+
+    def rnd() -> float:
+        nonlocal a
+        a = (a + 0x6D2B79F5) & 0xFFFFFFFF
+        t = (a ^ (a >> 15)) & 0xFFFFFFFF
+        t = _imul(t, 1 | a)
+        t = ((t + _imul((t ^ (t >> 7)) & 0xFFFFFFFF, (61 | t) & 0xFFFFFFFF)) & 0xFFFFFFFF) ^ t
+        t &= 0xFFFFFFFF
+        return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296
+
+    horizontal = math.floor(rnd() * 361)        # 0..360
+    vertical = math.floor(rnd() * 91) - 30       # -30..60
+    zoom = math.floor(rnd() * 101) / 10          # 0.0..10.0
+    return horizontal, vertical, zoom
 
 
 def _build_camera_info(horizontal_angle: int, vertical_angle: int, zoom: float) -> dict:
@@ -140,10 +166,7 @@ class QwenMultiangleCameraNode(io.ComfyNode):
         image=None,
     ) -> io.NodeOutput:
         if randomize:
-            rng = random.Random(int(seed))
-            horizontal_angle = rng.randint(0, 360)
-            vertical_angle = rng.randint(-30, 60)
-            zoom = round(rng.uniform(0.0, 10.0), 1)
+            horizontal_angle, vertical_angle, zoom = _seeded_angles(int(seed))
 
         horizontal_angle = max(0, min(360, int(horizontal_angle)))
         vertical_angle = max(-30, min(60, int(vertical_angle)))
