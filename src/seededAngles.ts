@@ -1,8 +1,8 @@
 // Mulberry32 PRNG mapped to camera angles.
 //
-// MUST stay byte-for-byte identical to _seeded_angles() in nodes.py so the live
-// 3D preview matches the executed result exactly. Verified equal across seeds
-// (0, 1, 2, 42, 12345, 0xffffffff, ...).
+// Deterministic: a given seed always maps to the same pose. Drives the camera
+// pose in the frontend (writes the angle widgets); the backend just reads those
+// angles, so this is the single source of the seed→pose mapping.
 export function seededAngles(seed: number): {
   azimuth: number
   elevation: number

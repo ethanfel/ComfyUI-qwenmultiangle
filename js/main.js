@@ -27560,15 +27560,13 @@ function createInstance(node) {
   return instance;
 }
 function applySeededPosition(node, exposed) {
-  var _a, _b, _c, _d, _e;
-  const randomize = Boolean((_b = (_a = node.widgets) == null ? void 0 : _a.find((w) => w.name === "randomize")) == null ? void 0 : _b.value);
-  if (!randomize) return;
-  const seed = Number(((_d = (_c = node.widgets) == null ? void 0 : _c.find((w) => w.name === "seed")) == null ? void 0 : _d.value) ?? 0);
+  var _a, _b, _c;
+  const seed = Number(((_b = (_a = node.widgets) == null ? void 0 : _a.find((w) => w.name === "seed")) == null ? void 0 : _b.value) ?? 0);
   const angles = seededAngles(seed);
   exposed.setState(angles);
   syncWidgetsFromState(node, angles);
   writeStoredProps(node, angles);
-  (_e = app.graph) == null ? void 0 : _e.setDirtyCanvas(true, true);
+  (_c = app.graph) == null ? void 0 : _c.setDirtyCanvas(true, true);
 }
 function bindWidgetCallbacks(node, exposed) {
   const wire = (name, apply2) => {
@@ -27602,7 +27600,6 @@ function bindWidgetCallbacks(node, exposed) {
     writeStoredProps(node, { cameraView });
   });
   wire("seed", () => applySeededPosition(node, exposed));
-  wire("randomize", () => applySeededPosition(node, exposed));
 }
 function createCameraWidget(node) {
   var _a;
@@ -27633,7 +27630,6 @@ function createCameraWidget(node) {
   );
   instance.widget = widget;
   bindWidgetCallbacks(node, instance.exposed);
-  applySeededPosition(node, instance.exposed);
   const baseOnRemove = (_a = widget.onRemove) == null ? void 0 : _a.bind(widget);
   widget.onRemove = () => {
     baseOnRemove == null ? void 0 : baseOnRemove();
@@ -27681,27 +27677,11 @@ function applyPreviewImageFromOutput(instance, output) {
   const url = api.apiURL(`/view?${params.toString()}`);
   instance.exposed.updateImage(url);
 }
-function applyCameraStateFromOutput(node, instance, output) {
-  var _a;
-  if (!output || typeof output !== "object") return;
-  const raw = output.camera_state;
-  if (!raw || typeof raw !== "object") return;
-  const patch = {};
-  if (typeof raw.azimuth === "number") patch.azimuth = raw.azimuth;
-  if (typeof raw.elevation === "number") patch.elevation = raw.elevation;
-  if (typeof raw.distance === "number") patch.distance = raw.distance;
-  if (Object.keys(patch).length === 0) return;
-  instance.exposed.setState(patch);
-  syncWidgetsFromState(node, patch);
-  writeStoredProps(node, patch);
-  (_a = app.graph) == null ? void 0 : _a.setDirtyCanvas(true, true);
-}
 function setupOnExecuted(node, instance) {
   const originalOnExecuted = node.onExecuted;
   node.onExecuted = function(output) {
     originalOnExecuted == null ? void 0 : originalOnExecuted.call(this, output);
     applyPreviewImageFromOutput(instance, output);
-    applyCameraStateFromOutput(node, instance, output);
   };
 }
 function setupOnResize(node, instance) {

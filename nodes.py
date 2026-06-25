@@ -22,33 +22,6 @@ from typing_extensions import override
 _SCENE_CENTER_Y = 0.5
 
 
-def _imul(a: int, b: int) -> int:
-    return (a * b) & 0xFFFFFFFF
-
-
-def _seeded_angles(seed: int) -> tuple[int, int, float]:
-    """Deterministic camera angles from a seed, via the mulberry32 PRNG.
-
-    MUST stay byte-for-byte identical to seededAngles() in src/seededAngles.ts so
-    the live 3D preview in the frontend matches the executed result exactly.
-    """
-    a = seed & 0xFFFFFFFF
-
-    def rnd() -> float:
-        nonlocal a
-        a = (a + 0x6D2B79F5) & 0xFFFFFFFF
-        t = (a ^ (a >> 15)) & 0xFFFFFFFF
-        t = _imul(t, 1 | a)
-        t = ((t + _imul((t ^ (t >> 7)) & 0xFFFFFFFF, (61 | t) & 0xFFFFFFFF)) & 0xFFFFFFFF) ^ t
-        t &= 0xFFFFFFFF
-        return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296
-
-    horizontal = math.floor(rnd() * 361)        # 0..360
-    vertical = math.floor(rnd() * 91) - 30       # -30..60
-    zoom = math.floor(rnd() * 101) / 10          # 0.0..10.0
-    return horizontal, vertical, zoom
-
-
 def _build_camera_info(horizontal_angle: int, vertical_angle: int, zoom: float) -> dict:
     az_rad = math.radians(horizontal_angle)
     el_rad = math.radians(vertical_angle)
@@ -70,16 +43,12 @@ class _WidgetPreviewImages(_UIOutput):
     """Custom UI output that sends image metadata to our widget only,
     without triggering ComfyUI's built-in image preview."""
 
-    def __init__(self, results: list[SavedResult], camera_state: dict | None = None):
+    def __init__(self, results: list[SavedResult]):
         super().__init__()
         self.results = results
-        self.camera_state = camera_state
 
     def as_dict(self) -> dict:
-        out: dict = {"preview_images": self.results}
-        if self.camera_state is not None:
-            out["camera_state"] = self.camera_state
-        return out
+        return {"preview_images": self.results}
 
 
 class QwenMultiangleCameraNode(io.ComfyNode):
@@ -120,13 +89,8 @@ class QwenMultiangleCameraNode(io.ComfyNode):
                     default=0, min=0, max=0xffffffffffffffff,
                     control_after_generate=True,
                     display_name="Seed",
-                    tooltip="Seed for the random camera angle (used when Randomize is on)",
-                ),
-                io.Boolean.Input(
-                    "randomize",
-                    default=False,
-                    display_name="Randomize",
-                    tooltip="Pick a random camera angle from the seed instead of the manual angles",
+                    tooltip="Camera pose seed. Scrub it for a reproducible angle, or set "
+                            "control_after_generate to 'randomize' for a new angle each run.",
                 ),
                 io.Boolean.Input(
                     "default_prompts",
@@ -160,14 +124,12 @@ class QwenMultiangleCameraNode(io.ComfyNode):
         vertical_angle,
         zoom,
         seed=0,
-        randomize=False,
         default_prompts=True,
         camera_view=False,
         image=None,
     ) -> io.NodeOutput:
-        if randomize:
-            horizontal_angle, vertical_angle, zoom = _seeded_angles(int(seed))
-
+        # The seed drives the pose in the frontend (it writes the angle widgets),
+        # so here we simply use whatever angles arrived.
         horizontal_angle = max(0, min(360, int(horizontal_angle)))
         vertical_angle = max(-30, min(60, int(vertical_angle)))
         zoom = max(0.0, min(10.0, float(zoom)))
@@ -227,19 +189,7 @@ class QwenMultiangleCameraNode(io.ComfyNode):
 
         camera_info = _build_camera_info(horizontal_angle, vertical_angle, zoom)
 
-        # When randomizing, the angles were chosen server-side, so push them back
-        # to the frontend to sync the 3D preview and the number widgets.
-        camera_state = None
-        if randomize:
-            camera_state = {
-                "azimuth": horizontal_angle,
-                "elevation": vertical_angle,
-                "distance": zoom,
-            }
-
-        return io.NodeOutput(
-            prompt, camera_info, ui=_WidgetPreviewImages(ui_results, camera_state)
-        )
+        return io.NodeOutput(prompt, camera_info, ui=_WidgetPreviewImages(ui_results))
 
     @classmethod
     def fingerprint_inputs(
@@ -248,14 +198,12 @@ class QwenMultiangleCameraNode(io.ComfyNode):
         vertical_angle,
         zoom,
         seed=0,
-        randomize=False,
         default_prompts=True,
         camera_view=False,
         image=None,
     ):
         parts = [
-            str(horizontal_angle), str(vertical_angle), str(zoom),
-            str(seed), str(randomize),
+            str(horizontal_angle), str(vertical_angle), str(zoom), str(seed),
         ]
         if image is not None:
             parts.append(str(image.shape))

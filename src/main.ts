@@ -279,12 +279,11 @@ function createInstance(node: QwenMultiangleNode): QwenInstance {
   return instance
 }
 
-// Drive the live 3D position from the seed when Randomize is on. Uses the same
-// PRNG as the backend (seededAngles ↔ _seeded_angles), so the pose you see while
-// scrubbing the seed is exactly what executes — no run required to preview it.
+// Drive the live 3D pose from the seed. Wired to the seed widget's callback, so
+// it fires both when the user scrubs the seed and when control_after_generate
+// rolls it each run (litegraph calls the widget callback on roll). seededAngles
+// is deterministic, so a given seed always maps to the same reproducible pose.
 function applySeededPosition(node: QwenMultiangleNode, exposed: AppExposed): void {
-  const randomize = Boolean(node.widgets?.find(w => w.name === 'randomize')?.value)
-  if (!randomize) return
   const seed = Number(node.widgets?.find(w => w.name === 'seed')?.value ?? 0)
   const angles = seededAngles(seed)
   exposed.setState(angles)
@@ -327,9 +326,8 @@ function bindWidgetCallbacks(
     exposed.setCameraView(cameraView)
     writeStoredProps(node, { cameraView })
   })
-  // Seed scrub or Randomize toggle → recompute the pose live.
+  // Seed scrub, or control_after_generate rolling the seed → recompute the pose.
   wire('seed', () => applySeededPosition(node, exposed))
-  wire('randomize', () => applySeededPosition(node, exposed))
 }
 
 function createCameraWidget(node: QwenMultiangleNode): DOMWidgetInstance {
@@ -363,9 +361,6 @@ function createCameraWidget(node: QwenMultiangleNode): DOMWidgetInstance {
 
   instance.widget = widget
   bindWidgetCallbacks(node, instance.exposed)
-  // If Randomize is already on (e.g. restored from a saved workflow), reflect the
-  // seed's pose immediately so the preview isn't stale until the next scrub/run.
-  applySeededPosition(node, instance.exposed)
 
   const baseOnRemove = widget.onRemove?.bind(widget)
   widget.onRemove = () => {
@@ -432,35 +427,11 @@ function applyPreviewImageFromOutput(
   instance.exposed.updateImage(url)
 }
 
-// When the node randomizes the camera angle server-side, execute() pushes the
-// chosen angles back here so the 3D preview and the number widgets reflect them.
-function applyCameraStateFromOutput(
-  node: QwenMultiangleNode,
-  instance: QwenInstance,
-  output: unknown
-): void {
-  if (!output || typeof output !== 'object') return
-  const raw = (output as { camera_state?: Record<string, unknown> }).camera_state
-  if (!raw || typeof raw !== 'object') return
-
-  const patch: Partial<StoredCameraState> = {}
-  if (typeof raw.azimuth === 'number') patch.azimuth = raw.azimuth
-  if (typeof raw.elevation === 'number') patch.elevation = raw.elevation
-  if (typeof raw.distance === 'number') patch.distance = raw.distance
-  if (Object.keys(patch).length === 0) return
-
-  instance.exposed.setState(patch)
-  syncWidgetsFromState(node, patch)
-  writeStoredProps(node, patch)
-  app.graph?.setDirtyCanvas(true, true)
-}
-
 function setupOnExecuted(node: QwenMultiangleNode, instance: QwenInstance): void {
   const originalOnExecuted = node.onExecuted
   node.onExecuted = function(output: unknown) {
     originalOnExecuted?.call(this, output)
     applyPreviewImageFromOutput(instance, output)
-    applyCameraStateFromOutput(node, instance, output)
   }
 }
 
