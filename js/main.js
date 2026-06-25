@@ -27363,21 +27363,6 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
   }
 });
 const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-7061782c"]]);
-function seededAngles(seed) {
-  let a = seed >>> 0;
-  const rnd = () => {
-    a |= 0;
-    a = a + 1831565813 | 0;
-    let t2 = a ^ a >>> 15;
-    t2 = Math.imul(t2, 1 | a);
-    t2 = t2 + Math.imul(t2 ^ t2 >>> 7, 61 | t2) ^ t2;
-    return ((t2 ^ t2 >>> 14) >>> 0) / 4294967296;
-  };
-  const azimuth = Math.floor(rnd() * 361);
-  const elevation = Math.floor(rnd() * 91) - 30;
-  const distance = Math.floor(rnd() * 101) / 10;
-  return { azimuth, elevation, distance };
-}
 const { app } = window.comfyAPI.app;
 const { api } = window.comfyAPI.api;
 (() => {
@@ -27559,15 +27544,6 @@ function createInstance(node) {
   instances.set(node, instance);
   return instance;
 }
-function applySeededPosition(node, exposed) {
-  var _a, _b, _c;
-  const seed = Number(((_b = (_a = node.widgets) == null ? void 0 : _a.find((w) => w.name === "seed")) == null ? void 0 : _b.value) ?? 0);
-  const angles = seededAngles(seed);
-  exposed.setState(angles);
-  syncWidgetsFromState(node, angles);
-  writeStoredProps(node, angles);
-  (_c = app.graph) == null ? void 0 : _c.setDirtyCanvas(true, true);
-}
 function bindWidgetCallbacks(node, exposed) {
   const wire = (name, apply2) => {
     var _a;
@@ -27599,7 +27575,6 @@ function bindWidgetCallbacks(node, exposed) {
     exposed.setCameraView(cameraView);
     writeStoredProps(node, { cameraView });
   });
-  wire("seed", () => applySeededPosition(node, exposed));
 }
 function createCameraWidget(node) {
   var _a;

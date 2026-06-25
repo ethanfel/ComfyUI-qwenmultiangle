@@ -4,7 +4,6 @@ const { app } = window.comfyAPI.app
 const { api } = window.comfyAPI.api
 
 import App from './App.vue'
-import { seededAngles } from './seededAngles'
 import type { CameraState, AppExposed, QwenMultiangleNode } from './types'
 
 // Inject CSS from built assets
@@ -279,19 +278,6 @@ function createInstance(node: QwenMultiangleNode): QwenInstance {
   return instance
 }
 
-// Drive the live 3D pose from the seed. Wired to the seed widget's callback, so
-// it fires both when the user scrubs the seed and when control_after_generate
-// rolls it each run (litegraph calls the widget callback on roll). seededAngles
-// is deterministic, so a given seed always maps to the same reproducible pose.
-function applySeededPosition(node: QwenMultiangleNode, exposed: AppExposed): void {
-  const seed = Number(node.widgets?.find(w => w.name === 'seed')?.value ?? 0)
-  const angles = seededAngles(seed)
-  exposed.setState(angles)
-  syncWidgetsFromState(node, angles)
-  writeStoredProps(node, angles)
-  app.graph?.setDirtyCanvas(true, true)
-}
-
 function bindWidgetCallbacks(
   node: QwenMultiangleNode,
   exposed: AppExposed
@@ -326,8 +312,6 @@ function bindWidgetCallbacks(
     exposed.setCameraView(cameraView)
     writeStoredProps(node, { cameraView })
   })
-  // Seed scrub, or control_after_generate rolling the seed → recompute the pose.
-  wire('seed', () => applySeededPosition(node, exposed))
 }
 
 function createCameraWidget(node: QwenMultiangleNode): DOMWidgetInstance {

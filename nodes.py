@@ -22,6 +22,32 @@ from typing_extensions import override
 _SCENE_CENTER_Y = 0.5
 
 
+def _imul(a: int, b: int) -> int:
+    return (a * b) & 0xFFFFFFFF
+
+
+def _seeded_angles(seed: int) -> tuple[int, int, float]:
+    """Deterministic camera angles from a seed, via the mulberry32 PRNG.
+
+    Used by the Randomizer node. Same seed always yields the same angle.
+    """
+    a = seed & 0xFFFFFFFF
+
+    def rnd() -> float:
+        nonlocal a
+        a = (a + 0x6D2B79F5) & 0xFFFFFFFF
+        t = (a ^ (a >> 15)) & 0xFFFFFFFF
+        t = _imul(t, 1 | a)
+        t = ((t + _imul((t ^ (t >> 7)) & 0xFFFFFFFF, (61 | t) & 0xFFFFFFFF)) & 0xFFFFFFFF) ^ t
+        t &= 0xFFFFFFFF
+        return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296
+
+    horizontal = math.floor(rnd() * 361)        # 0..360
+    vertical = math.floor(rnd() * 91) - 30       # -30..60
+    zoom = math.floor(rnd() * 101) / 10          # 0.0..10.0
+    return horizontal, vertical, zoom
+
+
 def _build_camera_info(horizontal_angle: int, vertical_angle: int, zoom: float) -> dict:
     az_rad = math.radians(horizontal_angle)
     el_rad = math.radians(vertical_angle)
@@ -84,14 +110,6 @@ class QwenMultiangleCameraNode(io.ComfyNode):
                     display_name="Zoom",
                     tooltip="Camera distance (0=wide, 10=close-up)",
                 ),
-                io.Int.Input(
-                    "seed",
-                    default=0, min=0, max=0xffffffffffffffff,
-                    control_after_generate=True,
-                    display_name="Seed",
-                    tooltip="Camera pose seed. Scrub it for a reproducible angle, or set "
-                            "control_after_generate to 'randomize' for a new angle each run.",
-                ),
                 io.Boolean.Input(
                     "default_prompts",
                     default=True,
@@ -123,13 +141,10 @@ class QwenMultiangleCameraNode(io.ComfyNode):
         horizontal_angle,
         vertical_angle,
         zoom,
-        seed=0,
         default_prompts=True,
         camera_view=False,
         image=None,
     ) -> io.NodeOutput:
-        # The seed drives the pose in the frontend (it writes the angle widgets),
-        # so here we simply use whatever angles arrived.
         horizontal_angle = max(0, min(360, int(horizontal_angle)))
         vertical_angle = max(-30, min(60, int(vertical_angle)))
         zoom = max(0.0, min(10.0, float(zoom)))
@@ -197,14 +212,11 @@ class QwenMultiangleCameraNode(io.ComfyNode):
         horizontal_angle,
         vertical_angle,
         zoom,
-        seed=0,
         default_prompts=True,
         camera_view=False,
         image=None,
     ):
-        parts = [
-            str(horizontal_angle), str(vertical_angle), str(zoom), str(seed),
-        ]
+        parts = [str(horizontal_angle), str(vertical_angle), str(zoom)]
         if image is not None:
             parts.append(str(image.shape))
             try:
@@ -215,10 +227,49 @@ class QwenMultiangleCameraNode(io.ComfyNode):
         return "_".join(parts)
 
 
+class QwenMultiangleRandomizerNode(io.ComfyNode):
+    """
+    Seed-driven camera angle randomizer.
+
+    Outputs random horizontal/vertical/zoom values from a single seed. Wire the
+    outputs into the Qwen Multiangle Camera node's matching inputs. Set the seed's
+    control_after_generate to "randomize" for a new reproducible angle each run.
+    """
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="QwenMultiangleRandomizerNode",
+            display_name="Qwen Multiangle Randomizer",
+            category="image/multiangle",
+            description="Seed-driven random camera angles (horizontal, vertical, zoom)",
+            inputs=[
+                io.Int.Input(
+                    "seed",
+                    default=0, min=0, max=0xffffffff,
+                    control_after_generate=True,
+                    display_name="Seed",
+                    tooltip="Camera angle seed. Set control_after_generate to 'randomize' "
+                            "for a new reproducible angle each run.",
+                ),
+            ],
+            outputs=[
+                io.Int.Output("horizontal_angle", display_name="Horizontal Angle"),
+                io.Int.Output("vertical_angle", display_name="Vertical Angle"),
+                io.Float.Output("zoom", display_name="Zoom"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, seed=0) -> io.NodeOutput:
+        horizontal_angle, vertical_angle, zoom = _seeded_angles(int(seed))
+        return io.NodeOutput(horizontal_angle, vertical_angle, zoom)
+
+
 class QwenMultiangleExtension(ComfyExtension):
     @override
     async def get_node_list(self):
-        return [QwenMultiangleCameraNode]
+        return [QwenMultiangleCameraNode, QwenMultiangleRandomizerNode]
 
 
 async def comfy_entrypoint():
